@@ -159,36 +159,27 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp（使用
 
 **Claude客户端配置：**
 
-```
+```json
 {
-
   "mcpServers": {
-
-		"cocos-creator": {
-
- 		"type": "http",
-
-		"url": "http://127.0.0.1:3000/mcp"
-
-		 }
-
-	  }
+    "cocos-creator": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp"
+    }
+  }
 
 }
 ```
 
 **Cursor或VS类MCP配置**
 
-```
+```json
 {
-
   "mcpServers": {
-
-   "cocos-creator": {
+    "cocos-creator": {
       "url": "http://localhost:3000/mcp"
-   }
+    }
   }
-
 }
 ```
 

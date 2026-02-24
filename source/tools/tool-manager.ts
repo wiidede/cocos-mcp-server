@@ -2,6 +2,21 @@ import type { ToolConfig, ToolConfiguration, ToolManagerSettings } from '../type
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
+import { AssetAdvancedTools } from './asset-advanced-tools'
+import { BroadcastTools } from './broadcast-tools'
+import { ComponentTools } from './component-tools'
+import { DebugTools } from './debug-tools'
+import { NodeTools } from './node-tools'
+import { PrefabTools } from './prefab-tools'
+import { PreferencesTools } from './preferences-tools'
+import { ProjectTools } from './project-tools'
+import { ReferenceImageTools } from './reference-image-tools'
+import { SceneAdvancedTools } from './scene-advanced-tools'
+// 导入所有工具类
+import { SceneTools } from './scene-tools'
+import { SceneViewTools } from './scene-view-tools'
+import { ServerTools } from './server-tools'
+import { ValidationTools } from './validation-tools'
 
 export class ToolManager {
   private settings: ToolManagerSettings
@@ -84,22 +99,6 @@ export class ToolManager {
   private initializeAvailableTools(): void {
     // 从MCP服务器获取真实的工具列表
     try {
-      const { AssetAdvancedTools } = require('./asset-advanced-tools')
-      const { BroadcastTools } = require('./broadcast-tools')
-      const { ComponentTools } = require('./component-tools')
-      const { DebugTools } = require('./debug-tools')
-      const { NodeTools } = require('./node-tools')
-      const { PrefabTools } = require('./prefab-tools')
-      const { PreferencesTools } = require('./preferences-tools')
-      const { ProjectTools } = require('./project-tools')
-      const { ReferenceImageTools } = require('./reference-image-tools')
-      const { SceneAdvancedTools } = require('./scene-advanced-tools')
-      // 导入所有工具类
-      const { SceneTools } = require('./scene-tools')
-      const { SceneViewTools } = require('./scene-view-tools')
-      const { ServerTools } = require('./server-tools')
-      const { ValidationTools } = require('./validation-tools')
-
       // 初始化工具实例
       const tools = {
         scene: new SceneTools(),

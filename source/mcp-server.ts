@@ -167,7 +167,7 @@ export class MCPServer {
   }
 
   private async handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const parsedUrl = url.parse(req.url || '', true)
+    const parsedUrl = new url.URL(req.url || '', `http://${req.headers.host || 'localhost'}`)
     const pathname = parsedUrl.pathname
 
     // Set CORS headers
@@ -230,7 +230,8 @@ export class MCPServer {
             message = JSON.parse(fixedBody)
             console.log('[MCPServer] Fixed JSON parsing issue')
           }
-          catch (secondError) {
+          catch (e) {
+            console.error(e)
             throw new Error(`JSON parsing failed: ${parseError.message}. Original body: ${body.substring(0, 500)}...`)
           }
         }
@@ -265,10 +266,12 @@ export class MCPServer {
           result = { tools: this.getAvailableTools() }
           break
         case 'tools/call':
+        {
           const { name, arguments: args } = params
           const toolResult = await this.executeToolCall(name, args)
           result = { content: [{ type: 'text', text: JSON.stringify(toolResult) }] }
           break
+        }
         case 'initialize':
           // MCP initialization
           result = {
@@ -369,18 +372,19 @@ export class MCPServer {
         try {
           params = body ? JSON.parse(body) : {}
         }
-        catch (parseError: any) {
+        catch (e) {
           // Try to fix JSON issues
           const fixedBody = this.fixCommonJsonIssues(body)
           try {
             params = JSON.parse(fixedBody)
             console.log('[MCPServer] Fixed API JSON parsing issue')
           }
-          catch (secondError: any) {
+          catch (e2) {
+            console.error(e2)
             res.writeHead(400)
             res.end(JSON.stringify({
               error: 'Invalid JSON in request body',
-              details: parseError.message,
+              details: (e instanceof Error ? e.message : String(e)),
               receivedBody: body.substring(0, 200),
             }))
             return

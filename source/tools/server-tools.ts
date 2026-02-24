@@ -1,4 +1,6 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import os from 'node:os'
+import process from 'node:process'
 
 export class ServerTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -226,7 +228,6 @@ export class ServerTools implements ToolExecutor {
     return new Promise(async (resolve) => {
       try {
         // Get network interfaces using Node.js os module
-        const os = require('node:os')
         const interfaces = os.networkInterfaces()
 
         const networkInfo = Object.entries(interfaces).map(([name, addresses]: [string, any]) => ({

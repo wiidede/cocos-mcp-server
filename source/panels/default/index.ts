@@ -13,16 +13,6 @@ interface ToolConfig {
   description: string
 }
 
-// 定义配置接口
-interface Configuration {
-  id: string
-  name: string
-  description: string
-  tools: ToolConfig[]
-  createdAt: string
-  updatedAt: string
-}
-
 // 定义服务器设置接口
 interface ServerSettings {
   port: number
@@ -85,6 +75,24 @@ module.exports = Editor.Panel.define({
           const settingsChanged = ref(false)
 
           // 方法
+          const loadToolManagerState = async () => {
+            try {
+              const result = await Editor.Message.request('cocos-mcp-server', 'getToolManagerState')
+              if (result && result.success) {
+                // 总是加载后端状态，确保数据是最新的
+                availableTools.value = result.availableTools || []
+                console.log('[Vue App] Loaded tools:', availableTools.value.length)
+
+                // 更新工具分类
+                const categories = new Set(availableTools.value.map(tool => tool.category))
+                toolCategories.value = Array.from(categories)
+              }
+            }
+            catch (error) {
+              console.error('[Vue App] Failed to load tool manager state:', error)
+            }
+          }
+
           const switchTab = (tabName: string) => {
             activeTab.value = tabName
             if (tabName === 'tools') {
@@ -144,24 +152,6 @@ module.exports = Editor.Panel.define({
             }
           }
 
-          const loadToolManagerState = async () => {
-            try {
-              const result = await Editor.Message.request('cocos-mcp-server', 'getToolManagerState')
-              if (result && result.success) {
-                // 总是加载后端状态，确保数据是最新的
-                availableTools.value = result.availableTools || []
-                console.log('[Vue App] Loaded tools:', availableTools.value.length)
-
-                // 更新工具分类
-                const categories = new Set(availableTools.value.map(tool => tool.category))
-                toolCategories.value = Array.from(categories)
-              }
-            }
-            catch (error) {
-              console.error('[Vue App] Failed to load tool manager state:', error)
-            }
-          }
-
           const updateToolStatus = async (category: string, name: string, enabled: boolean) => {
             try {
               console.log('[Vue App] updateToolStatus called:', category, name, enabled)
@@ -200,28 +190,6 @@ module.exports = Editor.Panel.define({
             }
           }
 
-          const selectAllTools = async () => {
-            try {
-              // 直接更新本地状态，然后保存
-              availableTools.value.forEach(tool => tool.enabled = true)
-              await saveChanges()
-            }
-            catch (error) {
-              console.error('[Vue App] Failed to select all tools:', error)
-            }
-          }
-
-          const deselectAllTools = async () => {
-            try {
-              // 直接更新本地状态，然后保存
-              availableTools.value.forEach(tool => tool.enabled = false)
-              await saveChanges()
-            }
-            catch (error) {
-              console.error('[Vue App] Failed to deselect all tools:', error)
-            }
-          }
-
           const saveChanges = async () => {
             try {
               // 创建普通对象，避免Vue3响应式对象克隆错误
@@ -241,6 +209,28 @@ module.exports = Editor.Panel.define({
             }
             catch (error) {
               console.error('[Vue App] Failed to save tool changes:', error)
+            }
+          }
+
+          const selectAllTools = async () => {
+            try {
+              // 直接更新本地状态，然后保存
+              availableTools.value.forEach(tool => tool.enabled = true)
+              await saveChanges()
+            }
+            catch (error) {
+              console.error('[Vue App] Failed to select all tools:', error)
+            }
+          }
+
+          const deselectAllTools = async () => {
+            try {
+              // 直接更新本地状态，然后保存
+              availableTools.value.forEach(tool => tool.enabled = false)
+              await saveChanges()
+            }
+            catch (error) {
+              console.error('[Vue App] Failed to deselect all tools:', error)
             }
           }
 

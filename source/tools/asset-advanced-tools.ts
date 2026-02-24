@@ -1,4 +1,6 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import fs from 'node:fs'
+import path from 'node:path'
 
 export class AssetAdvancedTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -312,9 +314,6 @@ export class AssetAdvancedTools implements ToolExecutor {
   private async batchImportAssets(args: any): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
       try {
-        const fs = require('node:fs')
-        const path = require('node:path')
-
         if (!fs.existsSync(args.sourceDirectory)) {
           resolve({ success: false, error: 'Source directory does not exist' })
           return
@@ -376,8 +375,6 @@ export class AssetAdvancedTools implements ToolExecutor {
   }
 
   private getFilesFromDirectory(dirPath: string, fileFilter: string[], recursive: boolean): string[] {
-    const fs = require('node:fs')
-    const path = require('node:path')
     const files: string[] = []
 
     const items = fs.readdirSync(dirPath)
@@ -544,7 +541,7 @@ export class AssetAdvancedTools implements ToolExecutor {
                 manifestEntry.meta = assetInfo.meta
               }
             }
-            catch (err) {
+            catch {
               // Skip metadata if not available
             }
           }
