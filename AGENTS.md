@@ -2,13 +2,13 @@
 
 ## 项目概述
 
-**Cocos MCP Server** 是一个适用于 Cocos Creator 3.8+ 的综合性 MCP（模型上下文协议）服务器插件。它使 AI 助手（如 Claude、Cursor）能够通过标准化协议与 Cocos Creator 编辑器进行交互，实现 99% 的编辑器控制。
+**Cocos MCP Server** 是一个适用于 Cocos Creator 3.8+ 的综合性 MCP（模型上下文协议）服务器插件。它使 AI 助手（如 Claude、Cursor）能够通过标准化协议与 Cocos Creator 编辑器进行交互，提供 150+ 个工具实现全面的编辑器控制。
 
 ## 技术栈
 
 - **语言**: TypeScript
 - **运行时**: Node.js（由 Cocos Creator 自带）
-- **构建工具**: TypeScript 编译器 (`tsc`)
+- **构建工具**: tsdown (基于 Rolldown)
 - **依赖库**:
   - `fs-extra`: 文件系统操作
   - `uuid`: UUID 生成
@@ -89,33 +89,35 @@ pnpm run watch
 
 ### 命名规范
 
-所有工具采用 `类别_操作` 命名模式，参数采用统一 Schema，支持多操作码（action）切换。
+所有工具采用 `类别_操作` 命名模式（如 `scene_get_current_scene`、`node_create_node`），参数采用统一 Schema。
 
 ### 主要工具类别
 
-| 类别               | 工具数 | 功能描述                                 |
-| ------------------ | ------ | ---------------------------------------- |
-| `scene_*`          | 3      | 场景管理（获取/打开/保存/新建/关闭场景） |
-| `node_*`           | 6      | 节点查询、创建、删除、属性变更           |
-| `component_*`      | 4      | 组件增删、脚本挂载、组件信息             |
-| `prefab_*`         | 6      | 预制体浏览、创建、实例化、同步           |
-| `project_*`        | 2      | 项目运行、构建、配置信息                 |
-| `debug_*`          | 3      | 控制台与日志管理                         |
-| `asset_*`          | 5      | 资源导入、删除、依赖分析                 |
-| `preferences_*`    | 2      | 偏好设置管理                             |
-| `server_info`      | 1      | 服务器信息                               |
-| `broadcast_*`      | 1      | 消息广播                                 |
-| `referenceImage_*` | 2      | 参考图片管理                             |
-| `sceneView_*`      | 2      | 场景视图控制                             |
-| `validation_*`     | 2      | 场景和资源验证                           |
+当前版本（v1.4.0）包含 **150+ 个工具**，分布在 14 个类别中：
+
+| 类别               | 主要工具示例                                          | 功能描述                     |
+| ------------------ | ----------------------------------------------------- | ---------------------------- |
+| `scene_*`          | get_current_scene, open_scene, save_scene             | 场景管理                     |
+| `node_*`           | create_node, get_node_info, set_node_property         | 节点操作                     |
+| `component_*`      | add_component, remove_component, set_component_property | 组件管理                     |
+| `prefab_*`         | create_prefab, instantiate_prefab, update_prefab      | 预制体操作                   |
+| `project_*`        | run_project, build_project, get_project_info          | 项目控制                     |
+| `debug_*`          | get_console_logs, get_performance_stats, validate_scene | 调试工具                     |
+| `asset_*`          | import_asset, get_asset_info, get_asset_dependencies  | 资源管理                     |
+| `preferences_*`    | open_preferences_settings, set_preferences_config     | 偏好设置                     |
+| `server_*`         | get_server_status, query_server_ip_list               | 服务器信息                   |
+| `broadcast_*`      | get_broadcast_log, listen_broadcast                   | 消息广播                     |
+| `referenceImage_*` | add_reference_image, set_reference_image_opacity      | 参考图片管理                 |
+| `sceneView_*`      | change_gizmo_tool, focus_camera_on_nodes              | 场景视图控制                 |
+| `sceneAdvanced_*`  | copy_node, paste_node, execute_component_method       | 高级场景操作                 |
+| `validation_*`     | validate_json_params, format_mcp_request              | 验证工具                     |
 
 ### 工具调用示例
 
 ```json
 {
-  "tool": "node_lifecycle",
+  "tool": "node_create_node",
   "arguments": {
-    "action": "create",
     "name": "MyNode",
     "parentUuid": "parent-uuid",
     "nodeType": "2DNode"

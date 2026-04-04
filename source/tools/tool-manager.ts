@@ -31,6 +31,10 @@ export class ToolManager {
       console.log('[ToolManager] No configurations found, creating default configuration...')
       this.createConfiguration('默认配置', '自动创建的默认工具配置')
     }
+    else {
+      // 验证并修复现有配置
+      this.validateAndFixConfigurations()
+    }
   }
 
   private getToolManagerSettingsPath(): string {
@@ -141,101 +145,47 @@ export class ToolManager {
   }
 
   private initializeDefaultTools(): void {
-    // 默认工具列表作为后备方案
-    const toolCategories = [
-      { category: 'scene', name: '场景工具', tools: [
-        { name: 'getCurrentSceneInfo', description: '获取当前场景信息' },
-        { name: 'getSceneHierarchy', description: '获取场景层级结构' },
-        { name: 'createNewScene', description: '创建新场景' },
-        { name: 'saveScene', description: '保存场景' },
-        { name: 'loadScene', description: '加载场景' },
-      ] },
-      { category: 'node', name: '节点工具', tools: [
-        { name: 'getAllNodes', description: '获取所有节点' },
-        { name: 'findNodeByName', description: '根据名称查找节点' },
-        { name: 'createNode', description: '创建节点' },
-        { name: 'deleteNode', description: '删除节点' },
-        { name: 'setNodeProperty', description: '设置节点属性' },
-        { name: 'getNodeInfo', description: '获取节点信息' },
-      ] },
-      { category: 'component', name: '组件工具', tools: [
-        { name: 'addComponentToNode', description: '添加组件到节点' },
-        { name: 'removeComponentFromNode', description: '从节点移除组件' },
-        { name: 'setComponentProperty', description: '设置组件属性' },
-        { name: 'getComponentInfo', description: '获取组件信息' },
-      ] },
-      { category: 'prefab', name: '预制体工具', tools: [
-        { name: 'createPrefabFromNode', description: '从节点创建预制体' },
-        { name: 'instantiatePrefab', description: '实例化预制体' },
-        { name: 'getPrefabInfo', description: '获取预制体信息' },
-        { name: 'savePrefab', description: '保存预制体' },
-      ] },
-      { category: 'project', name: '项目工具', tools: [
-        { name: 'getProjectInfo', description: '获取项目信息' },
-        { name: 'getAssetList', description: '获取资源列表' },
-        { name: 'createAsset', description: '创建资源' },
-        { name: 'deleteAsset', description: '删除资源' },
-      ] },
-      { category: 'debug', name: '调试工具', tools: [
-        { name: 'getConsoleLogs', description: '获取控制台日志' },
-        { name: 'getPerformanceStats', description: '获取性能统计' },
-        { name: 'validateScene', description: '验证场景' },
-        { name: 'getErrorLogs', description: '获取错误日志' },
-      ] },
-      { category: 'preferences', name: '偏好设置工具', tools: [
-        { name: 'getPreferences', description: '获取偏好设置' },
-        { name: 'setPreferences', description: '设置偏好设置' },
-        { name: 'resetPreferences', description: '重置偏好设置' },
-      ] },
-      { category: 'server', name: '服务器工具', tools: [
-        { name: 'getServerStatus', description: '获取服务器状态' },
-        { name: 'getConnectedClients', description: '获取连接的客户端' },
-        { name: 'getServerLogs', description: '获取服务器日志' },
-      ] },
-      { category: 'broadcast', name: '广播工具', tools: [
-        { name: 'broadcastMessage', description: '广播消息' },
-        { name: 'getBroadcastHistory', description: '获取广播历史' },
-      ] },
-      { category: 'sceneAdvanced', name: '高级场景工具', tools: [
-        { name: 'optimizeScene', description: '优化场景' },
-        { name: 'analyzeScene', description: '分析场景' },
-        { name: 'batchOperation', description: '批量操作' },
-      ] },
-      { category: 'sceneView', name: '场景视图工具', tools: [
-        { name: 'getViewportInfo', description: '获取视口信息' },
-        { name: 'setViewportCamera', description: '设置视口相机' },
-        { name: 'focusOnNode', description: '聚焦到节点' },
-      ] },
-      { category: 'referenceImage', name: '参考图片工具', tools: [
-        { name: 'addReferenceImage', description: '添加参考图片' },
-        { name: 'removeReferenceImage', description: '移除参考图片' },
-        { name: 'getReferenceImages', description: '获取参考图片列表' },
-      ] },
-      { category: 'assetAdvanced', name: '高级资源工具', tools: [
-        { name: 'importAsset', description: '导入资源' },
-        { name: 'exportAsset', description: '导出资源' },
-        { name: 'processAsset', description: '处理资源' },
-      ] },
-      { category: 'validation', name: '验证工具', tools: [
-        { name: 'validateProject', description: '验证项目' },
-        { name: 'validateAssets', description: '验证资源' },
-        { name: 'generateReport', description: '生成报告' },
-      ] },
-    ]
+    // 默认工具列表作为后备方案 - 使用与实际工具类相同的名称
+    try {
+      // 初始化工具实例（和 initializeAvailableTools 相同的逻辑）
+      const tools = {
+        scene: new SceneTools(),
+        node: new NodeTools(),
+        component: new ComponentTools(),
+        prefab: new PrefabTools(),
+        project: new ProjectTools(),
+        debug: new DebugTools(),
+        preferences: new PreferencesTools(),
+        server: new ServerTools(),
+        broadcast: new BroadcastTools(),
+        sceneAdvanced: new SceneAdvancedTools(),
+        sceneView: new SceneViewTools(),
+        referenceImage: new ReferenceImageTools(),
+        assetAdvanced: new AssetAdvancedTools(),
+        validation: new ValidationTools(),
+      }
 
-    this.availableTools = []
-    toolCategories.forEach((category) => {
-      category.tools.forEach((tool) => {
-        this.availableTools.push({
-          category: category.category,
-          name: tool.name,
-          enabled: true, // 默认启用
-          description: tool.description,
+      // 从每个工具类获取工具列表
+      this.availableTools = []
+      for (const [category, toolSet] of Object.entries(tools)) {
+        const toolDefinitions = toolSet.getTools()
+        toolDefinitions.forEach((tool: any) => {
+          this.availableTools.push({
+            category,
+            name: tool.name,
+            enabled: true, // 默认启用
+            description: tool.description,
+          })
         })
-      })
-    })
+      }
 
-    console.log(`[ToolManager] Initialized ${this.availableTools.length} default tools`)
+      console.log(`[ToolManager] Initialized ${this.availableTools.length} tools from default fallback`)
+    }
+    catch (error) {
+      console.error('[ToolManager] Failed to initialize tools from default fallback:', error)
+      // 如果连这个也失败了，使用空列表
+      this.availableTools = []
+    }
   }
 
   public getAvailableTools(): ToolConfig[] {
@@ -424,5 +374,58 @@ export class ToolManager {
     console.log(`Backend: Saving settings, current configs count: ${this.settings.configurations.length}`)
     this.saveToolManagerSettings(this.settings)
     console.log(`Backend: Settings saved to file`)
+  }
+
+  /**
+   * 验证并修复配置中的工具名称
+   * 如果配置中的工具名称和实际工具类中的名称不匹配，则重新生成配置
+   */
+  private validateAndFixConfigurations(): void {
+    const availableToolMap = new Map<string, ToolConfig>()
+    this.availableTools.forEach((tool) => {
+      availableToolMap.set(`${tool.category}_${tool.name}`, tool)
+    })
+
+    let needsSave = false
+
+    for (const config of this.settings.configurations) {
+      const invalidTools: string[] = []
+
+      for (const tool of config.tools) {
+        const key = `${tool.category}_${tool.name}`
+        if (!availableToolMap.has(key)) {
+          invalidTools.push(key)
+        }
+      }
+
+      if (invalidTools.length > 0) {
+        console.warn(`[ToolManager] Configuration "${config.name}" has ${invalidTools.length} invalid tools, regenerating...`)
+        console.warn(`[ToolManager] Invalid tools:`, invalidTools)
+
+        // 重新生成工具列表，保留启用状态
+        const enabledToolKeys = new Set(config.tools.filter(t => t.enabled).map(t => `${t.category}_${t.name}`))
+
+        config.tools = this.availableTools.map((tool) => {
+          const key = `${tool.category}_${tool.name}`
+          // 如果旧配置中有这个工具且是启用的，则保持启用
+          // 注意：这里使用模糊匹配，因为工具名称可能已经改变
+          const wasEnabled = enabledToolKeys.has(key) || config.tools.some(
+            t => t.category === tool.category && t.enabled,
+          )
+          return {
+            ...tool,
+            enabled: wasEnabled,
+          }
+        })
+
+        config.updatedAt = new Date().toISOString()
+        needsSave = true
+      }
+    }
+
+    if (needsSave) {
+      this.saveSettings()
+      console.log('[ToolManager] Configurations validated and fixed')
+    }
   }
 }

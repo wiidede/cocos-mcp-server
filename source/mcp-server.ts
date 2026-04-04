@@ -109,6 +109,11 @@ export class MCPServer {
       // 根据启用的工具配置过滤
       const enabledToolNames = new Set(this.enabledTools.map(tool => `${tool.category}_${tool.name}`))
 
+      // 调试：打印启用的工具名称
+      if (this.settings.enableDebugLog) {
+        console.log('[MCPServer] Enabled tool names:', Array.from(enabledToolNames))
+      }
+
       for (const [category, toolSet] of Object.entries(this.tools)) {
         const tools = toolSet.getTools()
         for (const tool of tools) {
@@ -116,6 +121,21 @@ export class MCPServer {
           if (enabledToolNames.has(toolName)) {
             this.toolsList.push({
               name: toolName,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })
+          }
+        }
+      }
+
+      // 如果过滤后没有工具，可能是名称不匹配，返回所有工具作为后备
+      if (this.toolsList.length === 0) {
+        console.warn('[MCPServer] No tools matched enabled tools list, falling back to all tools')
+        for (const [category, toolSet] of Object.entries(this.tools)) {
+          const tools = toolSet.getTools()
+          for (const tool of tools) {
+            this.toolsList.push({
+              name: `${category}_${tool.name}`,
               description: tool.description,
               inputSchema: tool.inputSchema,
             })
