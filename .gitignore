@@ -1,3 +1,4 @@
 node_modules
 cocos-mcp-server-pkg
 dist
+.DS_Store

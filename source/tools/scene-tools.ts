@@ -43,20 +43,28 @@ export class SceneTools implements ToolExecutor {
       },
       {
         name: 'create_scene',
-        description: 'Create a new scene asset',
+        description: 'Create a new scene asset. If autoCreateCanvas=true, also opens the scene and adds a Canvas 2DNode + cc.Canvas component.',
         inputSchema: {
           type: 'object',
           properties: {
             sceneName: {
               type: 'string',
-              description: 'Name of the new scene',
+              description: 'Name of the new scene (optional when savePath already contains the filename)',
             },
             savePath: {
               type: 'string',
               description: 'Path to save the scene (e.g., db://assets/scenes/NewScene.scene)',
             },
+            path: {
+              type: 'string',
+              description: 'Alias of savePath. Either savePath or path is required.',
+            },
+            autoCreateCanvas: {
+              type: 'boolean',
+              description: 'After saving the scene, open it and add a Canvas 2DNode with cc.Canvas component',
+              default: false,
+            },
           },
-          required: ['sceneName', 'savePath'],
         },
       },
       {
@@ -109,7 +117,7 @@ export class SceneTools implements ToolExecutor {
       case 'save_scene':
         return await this.saveScene()
       case 'create_scene':
-        return await this.createScene(args.sceneName, args.savePath)
+        return await this.createScene(args.sceneName, args.savePath, args)
       case 'save_scene_as':
         return await this.saveSceneAs(args.path)
       case 'close_scene':
@@ -203,16 +211,31 @@ export class SceneTools implements ToolExecutor {
     })
   }
 
-  private async createScene(sceneName: string, savePath: string): Promise<ToolResponse> {
+  private async createScene(sceneName?: string, savePath?: string, extraArgs: any = {}): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      // 确保路径以.scene结尾
-      const fullPath = savePath.endsWith('.scene') ? savePath : `${savePath}/${sceneName}.scene`
+      // 兼容 path / savePath 两种参数，并允许从 savePath 推断 sceneName
+      const rawPath = (extraArgs.path || savePath || '') as string
+      if (!rawPath) {
+        resolve({
+          success: false,
+          error: 'createScene requires savePath (or path) parameter, e.g. "db://assets/scenes/Main.scene"',
+        })
+        return
+      }
+
+      // 从 savePath 中提取文件名作为 sceneName（如果未提供）
+      const fileName = rawPath.split('/').pop() || ''
+      const inferredName = fileName.replace(/\.scene$/i, '') || 'NewScene'
+      const finalSceneName = (sceneName && sceneName.trim()) || inferredName
+
+      // 确保路径以 .scene 结尾
+      const fullPath = rawPath.endsWith('.scene') ? rawPath : `${rawPath.replace(/\/$/, '')}/${finalSceneName}.scene`
 
       // 使用正确的Cocos Creator 3.8场景格式
       const sceneContent = JSON.stringify([
         {
           __type__: 'cc.SceneAsset',
-          _name: sceneName,
+          _name: finalSceneName,
           _objFlags: 0,
           __editorExtras__: {},
           _native: '',
@@ -222,7 +245,7 @@ export class SceneTools implements ToolExecutor {
         },
         {
           __type__: 'cc.Scene',
-          _name: sceneName,
+          _name: finalSceneName,
           _objFlags: 0,
           __editorExtras__: {},
           _parent: null,
@@ -365,35 +388,113 @@ export class SceneTools implements ToolExecutor {
       ], null, 2)
 
       Editor.Message.request('asset-db', 'create-asset', fullPath, sceneContent).then((result: any) => {
-        // Verify scene creation by checking if it exists
-        this.getSceneList().then((sceneList) => {
-          const createdScene = sceneList.data?.find((scene: any) => scene.uuid === result.uuid)
-          resolve({
-            success: true,
-            data: {
-              uuid: result.uuid,
-              url: result.url,
-              name: sceneName,
-              message: `Scene '${sceneName}' created successfully`,
-              sceneVerified: !!createdScene,
-            },
-            verificationData: createdScene,
+        const finalize = (canvasInfo: any = null) => {
+          this.getSceneList().then((sceneList) => {
+            const createdScene = sceneList.data?.find((scene: any) => scene.uuid === result.uuid)
+            resolve({
+              success: true,
+              data: {
+                uuid: result.uuid,
+                url: result.url,
+                name: finalSceneName,
+                path: fullPath,
+                message: `Scene '${finalSceneName}' created successfully`,
+                sceneVerified: !!createdScene,
+                canvas: canvasInfo,
+              },
+              verificationData: createdScene,
+            })
+          }).catch(() => {
+            resolve({
+              success: true,
+              data: {
+                uuid: result.uuid,
+                url: result.url,
+                name: finalSceneName,
+                path: fullPath,
+                message: `Scene '${finalSceneName}' created successfully (verification failed)`,
+                canvas: canvasInfo,
+              },
+            })
           })
-        }).catch(() => {
-          resolve({
-            success: true,
-            data: {
-              uuid: result.uuid,
-              url: result.url,
-              name: sceneName,
-              message: `Scene '${sceneName}' created successfully (verification failed)`,
-            },
-          })
-        })
+        }
+
+        // autoCreateCanvas：先打开场景，再创建 2D Canvas 节点 + cc.Canvas 组件
+        if (extraArgs.autoCreateCanvas === true) {
+          this.bootstrapCanvasInScene(result.uuid)
+            .then(info => finalize(info))
+            .catch((err: Error) => finalize({ error: err.message }))
+        }
+        else {
+          finalize()
+        }
       }).catch((err: Error) => {
         resolve({ success: false, error: err.message })
       })
     })
+  }
+
+  private async bootstrapCanvasInScene(sceneUuid: string): Promise<any> {
+    // 1) 打开新建的场景
+    await new Promise<void>((resolve, reject) => {
+      Editor.Message.request('scene', 'open-scene', sceneUuid)
+        .then(() => resolve())
+        .catch((err: Error) => reject(err))
+    })
+
+    // 2) 等待场景就绪
+    await new Promise<void>((resolve) => {
+      const tryReady = () => {
+        Editor.Message.request('scene', 'query-is-ready').then((ready: boolean) => {
+          if (ready) {
+            resolve()
+          }
+          else {
+            setTimeout(tryReady, 100)
+          }
+        }).catch(() => {
+          setTimeout(tryReady, 100)
+        })
+      }
+      tryReady()
+    })
+
+    // 3) 拿场景根节点
+    const tree: any = await Editor.Message.request('scene', 'query-node-tree')
+    if (!tree || !tree.uuid) {
+      throw new Error('Failed to query scene root node after open')
+    }
+
+    // 4) 创建 2DNode "Canvas" 作为根节点的子节点（2DNode 类型自带 cc.UITransform）
+    const createResult: any = await Editor.Message.request('scene', 'create-node', {
+      name: 'Canvas',
+      parent: tree.uuid,
+      type: '2DNode',
+    })
+    const canvasUuid = Array.isArray(createResult) ? createResult[0] : createResult
+    if (!canvasUuid) {
+      throw new Error('Failed to create Canvas node')
+    }
+
+    // 5) 显式添加 cc.Canvas 组件
+    try {
+      await Editor.Message.request('scene', 'create-component', {
+        uuid: canvasUuid,
+        component: 'cc.Canvas',
+      })
+    }
+    catch (canvasErr: any) {
+      // 若 Canvas 已存在则忽略
+      const msg = String(canvasErr?.message || canvasErr)
+      if (!/already exists/i.test(msg)) {
+        throw canvasErr
+      }
+    }
+
+    return {
+      canvasNodeUuid: canvasUuid,
+      note: 'cc.UITransform is auto-attached on 2DNode. If cc.Canvas reports "already exists" you can ignore it.',
+    }
   }
 
   private async getSceneHierarchy(includeComponents: boolean = false): Promise<ToolResponse> {
@@ -470,6 +571,19 @@ export class SceneTools implements ToolExecutor {
   }
 
   private async closeScene(): Promise<ToolResponse> {
+    // 预检：没有打开的场景时直接 noop，避免触发 Cocos 内部
+    // "Trying to close current edit scene in general edit mode is not allowed" 错误。
+    try {
+      const currentScene = await Editor.Message.request('scene', 'query-current-scene') as { uuid?: string } | null
+      if (!currentScene || !currentScene.uuid) {
+        return { success: true, message: 'No scene is open, no-op' }
+      }
+    }
+    catch {
+      // 查不到场景信息时不再继续 close
+      return { success: true, message: 'No scene is open, no-op' }
+    }
+
     return new Promise((resolve) => {
       Editor.Message.request('scene', 'close-scene').then(() => {
         resolve({

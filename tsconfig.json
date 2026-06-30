@@ -1,13 +1,23 @@
 {
-  "extends": "./base.tsconfig.json",
   "compilerOptions": {
+    "target": "ESNext",
+    "experimentalDecorators": true,
     "rootDir": ".",
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "resolveJsonModule": true,
     "types": [
       "node",
       "@cocos/creator-types/editor",
       "@cocos/creator-types/engine"
     ],
-    "outDir": "./dist"
+    "strict": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
   },
   "include": ["source/**/*"]
 }

@@ -41,13 +41,18 @@ export class ComponentTools implements ToolExecutor {
       },
       {
         name: 'get_components',
-        description: 'Get all components of a node',
+        description: 'Get all components of a node. By default only returns summary info (type, name, uuid, enabled). Pass includeProperties=true to also include the full property tree (much larger payload).',
         inputSchema: {
           type: 'object',
           properties: {
             nodeUuid: {
               type: 'string',
               description: 'Node UUID',
+            },
+            includeProperties: {
+              type: 'boolean',
+              description: 'Include full component properties (default false to keep payload small)',
+              default: false,
             },
           },
           required: ['nodeUuid'],
@@ -203,7 +208,7 @@ export class ComponentTools implements ToolExecutor {
       case 'remove_component':
         return await this.removeComponent(args.nodeUuid, args.componentType)
       case 'get_components':
-        return await this.getComponents(args.nodeUuid)
+        return await this.getComponents(args.nodeUuid, args.includeProperties === true)
       case 'get_component_info':
         return await this.getComponentInfo(args.nodeUuid, args.componentType)
       case 'set_component_property':
@@ -217,10 +222,42 @@ export class ComponentTools implements ToolExecutor {
     }
   }
 
+  /**
+   * 把脚本资产 UUID 解析为对应的类名（仅对脚本资产有效）。
+   * Cocos Creator 的 create-component 接受类名或 { uuid, extends } 对象；
+   * 传纯 UUID 字符串时部分版本会失败，这里做一次显式转换。
+   */
+  private async resolveScriptClassNameByUuid(uuid: string): Promise<string | null> {
+    try {
+      // 1) 直接通过 asset-db 查资产信息
+      const assetInfo: any = await Editor.Message.request('asset-db', 'query-asset-info', uuid)
+      if (assetInfo && assetInfo.type === 'script' && assetInfo.name) {
+        return assetInfo.name
+      }
+      if (assetInfo && assetInfo.asset && assetInfo.asset.name) {
+        return assetInfo.asset.name
+      }
+    }
+    catch {
+      // ignore
+    }
+    return null
+  }
+
   private async addComponent(nodeUuid: string, componentType: string): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
-      // 判断是否为脚本组件（不以 cc. 开头的认为是脚本组件）
+      // 判断是否为脚本组件（不以 cc. 开头或明显是脚本资产 UUID）
       const isScriptComponent = !componentType.startsWith('cc.')
+      const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(componentType)
+
+      // 1) 如果传的是脚本资产 UUID，先解析为类名（create-component 兼容性更好）
+      let effectiveComponentType = componentType
+      if (looksLikeUuid) {
+        const resolvedName = await this.resolveScriptClassNameByUuid(componentType)
+        if (resolvedName) {
+          effectiveComponentType = resolvedName
+        }
+      }
 
       // 先查找节点上是否已存在该组件
       const allComponentsInfo = await this.getComponents(nodeUuid)
@@ -228,20 +265,16 @@ export class ComponentTools implements ToolExecutor {
       if (allComponentsInfo.success && allComponentsInfo.data?.components) {
         const existingComponent = allComponentsInfo.data.components.find((comp: any) => {
           const compType = comp.type || ''
-          // 对于内置组件，直接比较 type
-          if (!isScriptComponent) {
-            return compType === componentType
-          }
-          // 对于脚本组件，type 字段就是脚本名称
-          return compType === componentType
+          return compType === effectiveComponentType
         })
         if (existingComponent) {
           resolve({
             success: true,
-            message: `Component '${componentType}' already exists on node`,
+            message: `Component '${effectiveComponentType}' already exists on node`,
             data: {
               nodeUuid,
-              componentType,
+              componentType: effectiveComponentType,
+              originalInput: componentType,
               componentVerified: true,
               existing: true,
               actualType: existingComponent.type,
@@ -255,7 +288,7 @@ export class ComponentTools implements ToolExecutor {
       // 尝试直接使用 Editor API 添加组件
       Editor.Message.request('scene', 'create-component', {
         uuid: nodeUuid,
-        component: componentType,
+        component: effectiveComponentType,
       }).then(async (result: any) => {
         // 等待一段时间让Editor完成组件添加
         await new Promise(resolve => setTimeout(resolve, 200))
@@ -264,24 +297,22 @@ export class ComponentTools implements ToolExecutor {
           const allComponentsInfo2 = await this.getComponents(nodeUuid)
 
           if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
-            // 改进验证逻辑：对于脚本组件，type 字段就是脚本名称
             const addedComponent = allComponentsInfo2.data.components.find((comp: any) => {
               const compType = comp.type || ''
-              // 对于内置组件（以 cc. 开头）
-              if (componentType.startsWith('cc.')) {
-                return compType === componentType
-                  || compType.replace('cc.', '') === componentType.replace('cc.', '')
+              if (effectiveComponentType.startsWith('cc.')) {
+                return compType === effectiveComponentType
+                  || compType.replace('cc.', '') === effectiveComponentType.replace('cc.', '')
               }
-              // 对于脚本组件，type 字段就是脚本名称
-              return compType === componentType
+              return compType === effectiveComponentType
             })
             if (addedComponent) {
               resolve({
                 success: true,
-                message: `Component '${componentType}' added successfully`,
+                message: `Component '${effectiveComponentType}' added successfully`,
                 data: {
                   nodeUuid,
-                  componentType,
+                  componentType: effectiveComponentType,
+                  originalInput: componentType,
                   componentVerified: true,
                   existing: false,
                   actualType: addedComponent.type,
@@ -290,13 +321,12 @@ export class ComponentTools implements ToolExecutor {
               })
             }
             else {
-              // 如果找不到，列出所有组件的 name 和 type 便于调试
               const componentList = allComponentsInfo2.data.components.map((c: any) =>
                 `type:${c.type}, name:${c.name}`,
               ).join('; ')
               resolve({
                 success: false,
-                error: `Component '${componentType}' was not found on node after addition. Available components: ${componentList}`,
+                error: `Component '${effectiveComponentType}' was not found on node after addition. Available components: ${componentList}`,
               })
             }
           }
@@ -318,7 +348,7 @@ export class ComponentTools implements ToolExecutor {
         const options = {
           name: 'cocos-mcp-server',
           method: 'addComponentToNode',
-          args: [nodeUuid, componentType],
+          args: [nodeUuid, effectiveComponentType],
         }
         Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
           resolve(result)
@@ -369,7 +399,7 @@ export class ComponentTools implements ToolExecutor {
     })
   }
 
-  private async getComponents(nodeUuid: string): Promise<ToolResponse> {
+  private async getComponents(nodeUuid: string, includeProperties: boolean = false): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 优先尝试直接使用 Editor API 查询节点信息
       Editor.Message.request('scene', 'query-node', nodeUuid).then((nodeData: any) => {
@@ -384,20 +414,27 @@ export class ComponentTools implements ToolExecutor {
               || comp.cid
               || ''
 
-            return {
+            const result: any = {
               // type: 对于脚本组件是脚本名，对于内置组件是 cid
               type: comp.type || comp.cid || comp.__type__ || 'Unknown',
               name: extractedName,
               uuid: comp.uuid?.value || comp.uuid || null,
               enabled: comp.enabled !== undefined ? comp.enabled : true,
-              properties: this.extractComponentProperties(comp),
             }
+
+            // 默认不返回 properties，保持负载轻量；显式 includeProperties=true 时才展开完整属性
+            if (includeProperties) {
+              result.properties = this.extractComponentProperties(comp)
+            }
+
+            return result
           })
 
           resolve({
             success: true,
             data: {
               nodeUuid,
+              count: components.length,
               components,
             },
           })
@@ -571,12 +608,56 @@ export class ComponentTools implements ToolExecutor {
     }
   }
 
+  /**
+   * 通过 query-node 拿指定 componentType 的完整组件对象（含 value 字段）。
+   * 避免依赖 getComponents(includeProperties=true) 的重型输出。
+   */
+  private async fetchComponentValueByType(nodeUuid: string, componentType: string): Promise<any | null> {
+    try {
+      const nodeData: any = await Editor.Message.request('scene', 'query-node', nodeUuid)
+      if (!nodeData || !Array.isArray(nodeData.__comps__)) {
+        return null
+      }
+      return nodeData.__comps__.find((c: any) => {
+        if (c.cid === componentType)
+          return true
+        if (c.__type__ === componentType)
+          return true
+        if (c.type === componentType)
+          return true
+        // 内置组件允许省略 cc. 前缀
+        if (componentType.startsWith('cc.')) {
+          return c.cid === componentType
+            || c.cid === componentType.replace(/^cc\./, '')
+        }
+        return false
+      }) ?? null
+    }
+    catch (err) {
+      console.warn(`[ComponentTools] fetchComponentValueByType failed:`, err)
+      return null
+    }
+  }
+
   private async setComponentProperty(args: any): Promise<ToolResponse> {
-    const { nodeUuid, componentType, property, propertyType, value } = args
+    const { nodeUuid, componentType, property, value } = args
+
+    // 归一化 propertyType：大小写不敏感、支持常见别名；未传则做自动检测
+    const propertyType = this.normalizePropertyType(args.propertyType, value)
 
     return new Promise(async (resolve) => {
       try {
         console.log(`[ComponentTools] Setting ${componentType}.${property} (type: ${propertyType}) = ${JSON.stringify(value)} on node ${nodeUuid}`)
+
+        // 直接通过 query-node 拿组件的完整 value，避免 getComponents includeProperties=false 时拿不到属性的问题
+        const rawComponent = await this.fetchComponentValueByType(nodeUuid, componentType)
+        if (!rawComponent) {
+          resolve({
+            success: false,
+            error: `Component '${componentType}' not found on node '${nodeUuid}'.`,
+          })
+          return
+        }
 
         // Step 0: 检测是否为节点属性，如果是则重定向到对应的节点方法
         const nodeRedirectResult = await this.checkAndRedirectNodeProperties(args)
@@ -585,49 +666,13 @@ export class ComponentTools implements ToolExecutor {
           return
         }
 
-        // Step 1: 获取组件信息，使用与getComponents相同的方法
-        const componentsResponse = await this.getComponents(nodeUuid)
-        if (!componentsResponse.success || !componentsResponse.data) {
-          resolve({
-            success: false,
-            error: `Failed to get components for node '${nodeUuid}': ${componentsResponse.error}`,
-            instruction: `Please verify that node UUID '${nodeUuid}' is correct. Use get_all_nodes or find_node_by_name to get the correct node UUID.`,
-          })
-          return
-        }
+        // Step 1: 已通过 query-node 拿到完整 rawComponent；在此基础上做属性分析
 
-        const allComponents = componentsResponse.data.components
-
-        // Step 2: 查找目标组件
-        let targetComponent = null
-        const availableTypes: string[] = []
-
-        for (let i = 0; i < allComponents.length; i++) {
-          const comp = allComponents[i]
-          availableTypes.push(comp.type)
-
-          if (comp.type === componentType) {
-            targetComponent = comp
-            break
-          }
-        }
-
-        if (!targetComponent) {
-          // 提供更详细的错误信息和建议
-          const instruction = this.generateComponentSuggestion(componentType, availableTypes, property)
-          resolve({
-            success: false,
-            error: `Component '${componentType}' not found on node. Available components: ${availableTypes.join(', ')}`,
-            instruction,
-          })
-          return
-        }
-
-        // Step 3: 自动检测和转换属性值
+        // Step 2: 自动检测和转换属性值
         let propertyInfo
         try {
           console.log(`[ComponentTools] Analyzing property: ${property}`)
-          propertyInfo = this.analyzeProperty(targetComponent, property)
+          propertyInfo = this.analyzeProperty(rawComponent, property)
         }
         catch (analyzeError: any) {
           console.error(`[ComponentTools] Error in analyzeProperty:`, analyzeError)
@@ -646,7 +691,7 @@ export class ComponentTools implements ToolExecutor {
           return
         }
 
-        // Step 4: 处理属性值和设置
+        // Step 3: 处理属性值和设置
         const originalValue = propertyInfo.originalValue
         let processedValue: any
 
@@ -662,6 +707,29 @@ export class ComponentTools implements ToolExecutor {
             break
           case 'boolean':
             processedValue = Boolean(value)
+            break
+          case 'enum':
+            if (typeof value === 'number' || typeof value === 'string') {
+              processedValue = value
+            }
+            else {
+              throw new TypeError('Enum value must be a number or string')
+            }
+            break
+          case 'object':
+          case 'json':
+          case 'cc.ValueType':
+            if (value && typeof value === 'object') {
+              processedValue = value
+            }
+            else {
+              try {
+                processedValue = typeof value === 'string' ? JSON.parse(value) : value
+              }
+              catch {
+                processedValue = value
+              }
+            }
             break
           case 'color':
             if (typeof value === 'string') {
@@ -793,8 +861,16 @@ export class ComponentTools implements ToolExecutor {
               throw new TypeError('StringArray value must be an array')
             }
             break
-          default:
-            throw new Error(`Unsupported property type: ${propertyType}`)
+          default: {
+            // 兜底：尝试根据 value 自动推导类型
+            const inferred = this.inferTypeFromValue(value, property, propertyInfo)
+            if (inferred) {
+              console.log(`[ComponentTools] Inferred type for property '${property}': ${inferred}`)
+              processedValue = this.processTypedValue(value, inferred, property, propertyInfo)
+              break
+            }
+            throw new Error(this.buildUnsupportedPropertyTypeError(propertyType, value))
+          }
         }
 
         console.log(`[ComponentTools] Converting value: ${JSON.stringify(value)} -> ${JSON.stringify(processedValue)} (type: ${propertyType})`)
@@ -1204,17 +1280,7 @@ export class ComponentTools implements ToolExecutor {
       const allComponentsInfo = await this.getComponents(nodeUuid)
       if (allComponentsInfo.success && allComponentsInfo.data?.components) {
         // 改进查找逻辑：同时检查 type、name 和 cid 字段
-        const existingScript = allComponentsInfo.data.components.find((comp: any) => {
-          const compType = comp.type || ''
-          const compName = comp.name || ''
-          const compCid = comp.cid || ''
-          return compType === scriptName
-            || compName === scriptName
-            || compCid === scriptName
-            // 对于脚本组件，name 可能是 "ScriptName<ScriptName>" 格式
-            || compName.includes(`<${scriptName}>`)
-            || compName.startsWith(`${scriptName}<`)
-        })
+        const existingScript = allComponentsInfo.data.components.find((comp: any) => this.matchScriptComponent(comp, scriptName))
         if (existingScript) {
           resolve({
             success: true,
@@ -1240,17 +1306,7 @@ export class ComponentTools implements ToolExecutor {
         const allComponentsInfo2 = await this.getComponents(nodeUuid)
         if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
           // 改进验证逻辑：同时检查 type、name 和 cid 字段
-          const addedScript = allComponentsInfo2.data.components.find((comp: any) => {
-            const compType = comp.type || ''
-            const compName = comp.name || ''
-            const compCid = comp.cid || ''
-            return compType === scriptName
-              || compName === scriptName
-              || compCid === scriptName
-              // 对于脚本组件，name 可能是 "ScriptName<ScriptName>" 格式
-              || compName.includes(`<${scriptName}>`)
-              || compName.startsWith(`${scriptName}<`)
-          })
+          const addedScript = allComponentsInfo2.data.components.find((comp: any) => this.matchScriptComponent(comp, scriptName))
           if (addedScript) {
             resolve({
               success: true,
@@ -1381,67 +1437,58 @@ export class ComponentTools implements ToolExecutor {
     let propertyValue: any
     let propertyExists = false
 
-    // 尝试多种方式查找属性：
+    // query-node 返回的组件结构：{ cid, __type__, type, value: { ... }, uuid, enabled }
+    // 提取真正的属性容器：优先使用 component.value，其次 component.properties
+    const propertyContainer: any = (component && typeof component.value === 'object' && component.value !== null)
+      ? component.value
+      : (component && typeof component.properties === 'object' && component.properties !== null && !(Array.isArray(component.properties)))
+          ? (component.properties.value && typeof component.properties.value === 'object' ? component.properties.value : component.properties)
+          : component
+
     // 1. 直接属性访问
     if (Object.prototype.hasOwnProperty.call(component, propertyName)) {
       propertyValue = component[propertyName]
       propertyExists = true
     }
 
-    // 2. 从嵌套结构中查找 (如从测试数据看到的复杂结构)
-    if (!propertyExists && component.properties && typeof component.properties === 'object') {
-      // 首先检查properties.value是否存在（这是我们在getComponents中看到的结构）
-      if (component.properties.value && typeof component.properties.value === 'object') {
-        const valueObj = component.properties.value
-        for (const [key, propData] of Object.entries(valueObj)) {
-          // 检查propData是否是一个有效的属性描述对象
-          // 确保propData是对象且包含预期的属性结构
-          if (this.isValidPropertyDescriptor(propData)) {
-            const propInfo = propData as any
-            availableProperties.push(key)
-            if (key === propertyName) {
-              // 优先使用value属性，如果没有则使用propData本身
-              try {
-                const propKeys = Object.keys(propInfo)
-                propertyValue = propKeys.includes('value') ? propInfo.value : propInfo
-              }
-              catch (error) {
-                // 如果检查失败，直接使用propInfo
-                propertyValue = propInfo
-              }
-              propertyExists = true
+    // 2. 从嵌套结构中查找
+    if (!propertyExists && propertyContainer && typeof propertyContainer === 'object') {
+      for (const [key, propData] of Object.entries(propertyContainer)) {
+        if (this.isValidPropertyDescriptor(propData)) {
+          const propInfo = propData as any
+          availableProperties.push(key)
+          if (key === propertyName) {
+            try {
+              const propKeys = Object.keys(propInfo)
+              propertyValue = propKeys.includes('value') ? propInfo.value : propInfo
             }
+            catch (error) {
+              propertyValue = propInfo
+            }
+            propertyExists = true
           }
         }
-      }
-      else {
-        // 备用方案：直接从properties查找
-        for (const [key, propData] of Object.entries(component.properties)) {
-          if (this.isValidPropertyDescriptor(propData)) {
-            const propInfo = propData as any
-            availableProperties.push(key)
-            if (key === propertyName) {
-              // 优先使用value属性，如果没有则使用propData本身
-              try {
-                const propKeys = Object.keys(propInfo)
-                propertyValue = propKeys.includes('value') ? propInfo.value : propInfo
-              }
-              catch (error) {
-                // 如果检查失败，直接使用propInfo
-                propertyValue = propInfo
-              }
-              propertyExists = true
-            }
-          }
+        // query-node 原始结构：value[key] 是值本身，name/displayName/type 是元数据
+        else if (propertyContainer === component.value && key === propertyName) {
+          propertyValue = propData
+          propertyExists = true
         }
       }
     }
 
-    // 3. 从直接属性中提取简单属性名
-    if (availableProperties.length === 0) {
-      for (const key of Object.keys(component)) {
-        if (!key.startsWith('_') && !['__type__', 'cid', 'node', 'uuid', 'name', 'enabled', 'type', 'readonly', 'visible'].includes(key)) {
-          availableProperties.push(key)
+    // 3. 兜底：从直接属性中提取简单属性名（query-node value 结构常用）
+    if (availableProperties.length === 0 && propertyContainer && typeof propertyContainer === 'object') {
+      for (const key of Object.keys(propertyContainer)) {
+        if (['__type__', 'cid', 'node', 'uuid', 'name', 'enabled', 'type', 'readonly', 'visible', 'editor', 'extends', '_enabled', '_name', '_objFlags'].includes(key)) {
+          continue
+        }
+        if (key.startsWith('_')) {
+          continue
+        }
+        availableProperties.push(key)
+        if (!propertyExists && key === propertyName) {
+          propertyValue = propertyContainer[key]
+          propertyExists = true
         }
       }
     }
@@ -1664,6 +1711,282 @@ export class ComponentTools implements ToolExecutor {
         }
         return originalValue
     }
+  }
+
+  /**
+   * 将入参的 propertyType 归一化为内部统一的小写 token。
+   * - 大小写不敏感（Color/color/COLOR 都视为 color）
+   * - 兼容常见别名：cc.Color/cc.Vec2/cc.Size/cc.ValueType/Number/String/Boolean/Enum/Json/Object
+   * - 未传时基于 value 自动推断
+   */
+  private normalizePropertyType(rawType: string | undefined, value: any): string {
+    if (rawType === undefined || rawType === null || rawType === '') {
+      return this.inferTypeFromValue(value, '', null) ?? 'auto'
+    }
+
+    const lower = String(rawType).trim().toLowerCase()
+    if (!lower || lower === 'auto') {
+      return this.inferTypeFromValue(value, '', null) ?? 'auto'
+    }
+
+    const aliasMap: Record<string, string> = {
+      'color': 'color',
+      'cc.color': 'color',
+      'vec2': 'vec2',
+      'cc.vec2': 'vec2',
+      'vec3': 'vec3',
+      'cc.vec3': 'vec3',
+      'size': 'size',
+      'cc.size': 'size',
+      'number': 'number',
+      'integer': 'integer',
+      'int': 'integer',
+      'float': 'float',
+      'double': 'number',
+      'boolean': 'boolean',
+      'bool': 'boolean',
+      'string': 'string',
+      'str': 'string',
+      'enum': 'enum',
+      'object': 'object',
+      'obj': 'object',
+      'json': 'object',
+      'cc.valuetype': 'object',
+      'valuetype': 'object',
+      'node': 'node',
+      'cc.node': 'node',
+      'component': 'component',
+      'spriteframe': 'spriteFrame',
+      'prefab': 'prefab',
+      'asset': 'asset',
+      'nodearray': 'nodeArray',
+      'colorarray': 'colorArray',
+      'numberarray': 'numberArray',
+      'stringarray': 'stringArray',
+    }
+
+    if (aliasMap[lower]) {
+      return aliasMap[lower]
+    }
+
+    // 兼容驼峰写法，例如 sprite_frame / spriteframe / colorArray 等
+    const camel = lower.replace(/[_-]([a-z])/g, (_m, c) => c.toUpperCase())
+    if (aliasMap[camel]) {
+      return aliasMap[camel]
+    }
+
+    // 兜底：返回小写
+    return lower
+  }
+
+  /**
+   * 根据属性值和上下文（属性名、已分析信息）自动推断 propertyType。
+   * 返回 null 表示无法识别。
+   */
+  private inferTypeFromValue(value: any, propertyName: string, propertyInfo: any | null): string | null {
+    // 1. 如果 value 是字符串，尝试解析 hex 颜色
+    if (typeof value === 'string') {
+      if (/^#(?:[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value)) {
+        return 'color'
+      }
+      if (propertyInfo && propertyInfo.type === 'node') {
+        return 'node'
+      }
+      if (propertyInfo && propertyInfo.type === 'asset') {
+        return 'asset'
+      }
+      return 'string'
+    }
+
+    // 2. 数值
+    if (typeof value === 'number') {
+      return 'number'
+    }
+
+    // 3. 布尔
+    if (typeof value === 'boolean') {
+      return 'boolean'
+    }
+
+    // 4. 数组
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return 'stringArray'
+      }
+      const first = value[0]
+      if (typeof first === 'number') {
+        return 'numberArray'
+      }
+      if (typeof first === 'string') {
+        // 可能是 nodeArray 或 stringArray，根据属性名判断
+        if (propertyInfo && propertyInfo.type === 'nodeArray') {
+          return 'nodeArray'
+        }
+        if (/node|target|child/i.test(propertyName)) {
+          return 'nodeArray'
+        }
+        return 'stringArray'
+      }
+      if (first && typeof first === 'object') {
+        if ('r' in first || 'g' in first || 'b' in first) {
+          return 'colorArray'
+        }
+      }
+      return 'stringArray'
+    }
+
+    // 5. 对象：按字段识别
+    if (value && typeof value === 'object') {
+      const keys = Object.keys(value)
+      if (keys.includes('r') || keys.includes('g') || keys.includes('b')) {
+        return 'color'
+      }
+      if (keys.includes('width') || keys.includes('height')) {
+        return 'size'
+      }
+      if (keys.includes('x') && keys.includes('y') && keys.includes('z')) {
+        return 'vec3'
+      }
+      if (keys.includes('x') && keys.includes('y')) {
+        return 'vec2'
+      }
+      if (keys.includes('uuid') || keys.includes('__uuid__') || keys.includes('__id__')) {
+        // 通过属性名/类型判断是 node 还是 asset
+        if (propertyInfo && propertyInfo.type === 'node') {
+          return 'node'
+        }
+        if (propertyInfo && propertyInfo.type === 'asset') {
+          return 'asset'
+        }
+        if (/node|target|child/i.test(propertyName)) {
+          return 'node'
+        }
+        return 'asset'
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * 根据类型处理值，返回处理后的值（不包含 side-effects）。
+   * 用于自动类型推导后重走一次分派。
+   */
+  private processTypedValue(value: any, type: string, _propertyName: string, _propertyInfo: any): any {
+    switch (type) {
+      case 'string':
+        return String(value)
+      case 'number':
+      case 'integer':
+      case 'float':
+        return Number(value)
+      case 'boolean':
+        return Boolean(value)
+      case 'enum':
+        return value
+      case 'object':
+      case 'json':
+        return (value && typeof value === 'object') ? value : value
+      case 'color':
+        if (typeof value === 'string') {
+          return this.parseColorString(value)
+        }
+        return {
+          r: Math.min(255, Math.max(0, Number((value as any).r) || 0)),
+          g: Math.min(255, Math.max(0, Number((value as any).g) || 0)),
+          b: Math.min(255, Math.max(0, Number((value as any).b) || 0)),
+          a: (value as any).a !== undefined ? Math.min(255, Math.max(0, Number((value as any).a))) : 255,
+        }
+      case 'vec2':
+        return { x: Number((value as any).x) || 0, y: Number((value as any).y) || 0 }
+      case 'vec3':
+        return { x: Number((value as any).x) || 0, y: Number((value as any).y) || 0, z: Number((value as any).z) || 0 }
+      case 'size':
+        return { width: Number((value as any).width) || 0, height: Number((value as any).height) || 0 }
+      case 'node':
+        return typeof value === 'string' ? { uuid: value } : value
+      case 'asset':
+      case 'spriteFrame':
+      case 'prefab':
+        return typeof value === 'string' ? { uuid: value } : value
+      default:
+        return value
+    }
+  }
+
+  /**
+   * 把任意可能的组件 name 字段归一化为字符串。
+   * query-node 返回的 name 字段有时是字符串，有时是 { value: 'xxx' } 对象。
+   */
+  private normalizeComponentName(raw: any): string {
+    if (typeof raw === 'string') {
+      return raw
+    }
+    if (raw && typeof raw === 'object') {
+      if (typeof raw.value === 'string') {
+        return raw.value
+      }
+      if (raw.value && typeof raw.value === 'object' && typeof raw.value.value === 'string') {
+        return raw.value.value
+      }
+    }
+    return ''
+  }
+
+  /**
+   * 判断组件 comp 是否是指定 scriptName 对应的脚本组件。
+   * 兼容 comp.name 为字符串或 { value: '...' } 对象的情况。
+   */
+  private matchScriptComponent(comp: any, scriptName: string): boolean {
+    const compType = this.normalizeComponentName(comp.type)
+    const compName = this.normalizeComponentName(comp.name)
+    const compCid = this.normalizeComponentName(comp.cid)
+    console.log(compType, compName, compCid)
+    // 注意：query-node 返回的组件 name 可能是 "NodeName<UITransform>" 这种
+    // "节点名+<组件类>" 形式的字符串；不能用 .includes 匹配脚本名，
+    // 否则会出现"假阳性已存在"——尤其是节点名和脚本类同名时。
+    const compTypeUnderscore = this.normalizeComponentName(comp.__type__)
+    if (compType === scriptName)
+      return true
+    if (compTypeUnderscore === scriptName)
+      return true
+    if (compName === scriptName)
+      return true
+    // 脚本组件 name 也可能带 "NodeName<ScriptName>" 后缀，仅匹配严格后缀
+    if (compName.endsWith(`<${scriptName}>`))
+      return true
+    if (compCid && compCid !== 'cc.Script' && compCid === scriptName)
+      return true
+    return false
+  }
+
+  /**
+   * 构造 propertyType 不支持时的友好错误信息。
+   * 把支持的类型完整列出，并给出常见类型对应的 value 示例。
+   */
+  private buildUnsupportedPropertyTypeError(rawType: string, value: any): string {
+    const supported: { type: string, aliases: string[], example: string }[] = [
+      { type: 'color', aliases: ['Color', 'cc.Color', '#RRGGBB', '#RRGGBBAA'], example: '{ r: 255, g: 0, b: 0, a: 255 } or "#FF0000"' },
+      { type: 'vec2', aliases: ['Vec2', 'cc.Vec2'], example: '{ x: 100, y: 200 }' },
+      { type: 'vec3', aliases: ['Vec3', 'cc.Vec3'], example: '{ x: 1, y: 2, z: 3 }' },
+      { type: 'size', aliases: ['Size', 'cc.Size'], example: '{ width: 100, height: 50 }' },
+      { type: 'number', aliases: ['Number', 'int', 'integer', 'float', 'double'], example: '42' },
+      { type: 'string', aliases: ['String', 'str'], example: '"hello"' },
+      { type: 'boolean', aliases: ['Boolean', 'bool'], example: 'true' },
+      { type: 'enum', aliases: ['Enum'], example: '0 or "ValueName"' },
+      { type: 'object', aliases: ['Object', 'JSON', 'json', 'cc.ValueType'], example: '{ key: "value" }' },
+      { type: 'node', aliases: ['Node', 'cc.Node'], example: 'target node uuid (string) or { uuid: "..." }' },
+      { type: 'asset', aliases: ['Asset', 'spriteFrame', 'SpriteFrame', 'prefab', 'Prefab'], example: 'asset uuid (string) or { uuid: "..." }' },
+      { type: 'colorArray', aliases: ['ColorArray'], example: '[{ r:255, g:0, b:0, a:255 }]' },
+      { type: 'numberArray', aliases: ['NumberArray'], example: '[1, 2, 3]' },
+      { type: 'stringArray', aliases: ['StringArray'], example: '["a", "b"]' },
+      { type: 'nodeArray', aliases: ['NodeArray'], example: '["nodeUuid1", "nodeUuid2"]' },
+    ]
+    const list = supported.map(s => `  - ${s.type} (aliases: ${s.aliases.join('/')}) — example: ${s.example}`).join('\n')
+    return `Unsupported property type: "${rawType}".\n`
+      + `propertyType is case-insensitive. Supported types:\n${list}\n`
+      + `Tip: if you omit propertyType, the value will be auto-detected from the JSON shape.\n`
+      + `Received value: ${JSON.stringify(value)}`
   }
 
   private parseColorString(colorStr: string): { r: number, g: number, b: number, a: number } {

@@ -20,6 +20,14 @@ export const methods: { [key: string]: (...any: any) => any } = {
   },
 
   /**
+   * @en Open the dev test panel (debug-only)
+   * @zh 打开开发测试面板（仅供开发时使用）
+   */
+  openDevTestPanel() {
+    Editor.Panel.open('cocos-mcp-server.dev-test')
+  },
+
+  /**
    * @en Start the MCP server
    * @zh 启动 MCP 服务器
    */
@@ -224,6 +232,17 @@ export const methods: { [key: string]: (...any: any) => any } = {
 
   async getEnabledTools() {
     return toolManager.getEnabledTools()
+  },
+
+  /**
+   * @en Directly call an MCP tool (used by dev-test panel)
+   * @zh 直接调用 MCP 工具（供 dev-test panel 使用）
+   */
+  async callTool(toolName: string, args: any) {
+    if (!mcpServer) {
+      throw new Error('MCP server is not initialized')
+    }
+    return mcpServer.executeToolCall(toolName, args ?? {})
   },
 }
 

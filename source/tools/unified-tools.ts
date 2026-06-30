@@ -148,6 +148,8 @@ const SHARED_PROPERTIES: Record<string, any> = {
   port: PROP.number('Port'),
   visible: PROP.boolean('Visibility flag'),
   includeMetadata: PROP.boolean('Include metadata', { default: true }),
+  includeProperties: PROP.boolean('Include full property tree', { default: false }),
+  autoCreateCanvas: PROP.boolean('Auto-create a Canvas node after scene is created', { default: false }),
   is2D: PROP.boolean('Whether to use 2D view mode'),
   is3D: PROP.boolean('Whether to use 3D icon mode'),
   size: PROP.number('Size value'),
@@ -233,7 +235,7 @@ export class UnifiedTools {
         'scene_management',
         'Unified scene lifecycle tool. Actions: get_current, list, open, save, create, save_as, close.',
         ['get_current', 'list', 'open', 'save', 'create', 'save_as', 'close'],
-        ['scenePath', 'sceneName', 'savePath', 'path'],
+        ['scenePath', 'sceneName', 'savePath', 'path', 'autoCreateCanvas'],
         args => this.routeLegacyAction('scene_management', {
           get_current: 'scene_get_current_scene',
           list: 'scene_get_scene_list',
@@ -279,14 +281,15 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_query',
-        'Unified scene query tool. Actions: classes, components, nodes_by_asset_uuid, component_has_script.',
-        ['classes', 'components', 'nodes_by_asset_uuid', 'component_has_script'],
+        'Unified scene query tool. Actions: classes, components, nodes_by_asset_uuid, component_has_script, get_info.',
+        ['classes', 'components', 'nodes_by_asset_uuid', 'component_has_script', 'get_info'],
         ['extends', 'assetUuid', 'className'],
         args => this.routeLegacyAction('scene_query', {
           classes: 'sceneAdvanced_query_scene_classes',
           components: 'sceneAdvanced_query_scene_components',
           nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
           component_has_script: 'sceneAdvanced_query_component_has_script',
+          get_info: 'sceneAdvanced_query_scene_info',
         }, args),
       ),
       this.createTool(
@@ -439,7 +442,7 @@ export class UnifiedTools {
         'component_query',
         'Unified component query tool. Actions: get_components, get_info.',
         ['get_components', 'get_info'],
-        ['nodeUuid', 'componentType'],
+        ['nodeUuid', 'componentType', 'includeProperties'],
         args => this.routeLegacyAction('component_query', {
           get_components: 'component_get_components',
           get_info: 'component_get_component_info',
@@ -447,11 +450,12 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_property',
-        'Unified component property tool. Actions: set.',
-        ['set'],
+        'Unified component property tool. Actions: set, set_property.',
+        ['set', 'set_property'],
         ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'],
         args => this.routeLegacyAction('component_property', {
           set: 'component_set_component_property',
+          set_property: 'component_set_component_property',
         }, args),
       ),
       this.createTool(

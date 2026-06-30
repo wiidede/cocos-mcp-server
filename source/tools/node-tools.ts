@@ -530,10 +530,7 @@ export class NodeTools implements ToolExecutor {
           scale: nodeData.scale?.value || { x: 1, y: 1, z: 1 },
           parent: nodeData.parent?.value?.uuid || null,
           children: nodeData.children || [],
-          components: (nodeData.__comps__ || []).map((comp: any) => ({
-            type: comp.__type__ || 'Unknown',
-            enabled: comp.enabled !== undefined ? comp.enabled : true,
-          })),
+          components: (nodeData.__comps__ || []).map((comp: any) => this.parseComponentSummary(comp)),
           layer: nodeData.layer?.value || 1073741824,
           mobility: nodeData.mobility?.value || 0,
         }
@@ -542,6 +539,54 @@ export class NodeTools implements ToolExecutor {
         resolve({ success: false, error: err.message })
       })
     })
+  }
+
+  /**
+   * 把 query-node 返回的原始组件对象解析为统一的概要信息。
+   * 兼容多种 type 字段命名（type / cid / __type__）以及嵌套在 value 中的结构。
+   */
+  private parseComponentSummary(comp: any): { type: string, name: string, uuid: string | null, enabled: boolean } {
+    const rawType = comp.type || comp.cid || comp.__type__ || ''
+    const rawName = comp.value?.name || comp.name || ''
+    // comp.uuid 可能是字符串，也可能是 { value: 'xxx' } 形式
+    let compUuid: string | null = null
+    if (typeof comp.uuid === 'string') {
+      compUuid = comp.uuid
+    }
+    else if (comp.uuid && typeof comp.uuid === 'object' && 'value' in comp.uuid) {
+      compUuid = comp.uuid.value
+    }
+    else if (comp.value && comp.value.uuid) {
+      if (typeof comp.value.uuid === 'string') {
+        compUuid = comp.value.uuid
+      }
+      else if (comp.value.uuid.value) {
+        compUuid = comp.value.uuid.value
+      }
+    }
+
+    // 一些内建组件（如 cc.UITransform）只有 cid 没有 type，需要补一个可读名
+    const friendlyName = this.friendlyComponentName(rawName, rawType, comp)
+    return {
+      type: rawType || 'Unknown',
+      name: friendlyName,
+      uuid: compUuid,
+      enabled: comp.enabled !== undefined ? comp.enabled : true,
+    }
+  }
+
+  private friendlyComponentName(name: string, type: string, comp: any): string {
+    if (name && typeof name === 'string') {
+      // 形如 "Emitter<UITransform>" 透传即可
+      return name
+    }
+    if (type) {
+      return type
+    }
+    if (comp && comp.__type__) {
+      return comp.__type__
+    }
+    return 'Unknown'
   }
 
   private async findNodes(pattern: string, exactMatch: boolean = false): Promise<ToolResponse> {
@@ -707,47 +752,116 @@ export class NodeTools implements ToolExecutor {
     return path.join('/')
   }
 
+  /**
+   * 根据 value 的 JSON 形状自动推导出 Cocos Creator 期望的 dump.type。
+   * 缺省时 set-property API 对 Size/Color/Vec2/Vec3 等 ValueType 写入会"静默失败"。
+   */
+  private inferValueDumpType(value: any, propertyName: string): string | undefined {
+    if (value === null || value === undefined) {
+      return undefined
+    }
+    if (Array.isArray(value)) {
+      return undefined
+    }
+    if (typeof value !== 'object') {
+      return undefined
+    }
+    const keys = Object.keys(value)
+    // Node 引用：含 uuid 字段
+    if (keys.includes('uuid') || keys.includes('__uuid__') || keys.includes('__id__')) {
+      if (propertyName && /node|target|child|parent|root/i.test(propertyName)) {
+        return 'cc.Node'
+      }
+      return 'cc.Asset'
+    }
+    // Color
+    if (keys.includes('r') || keys.includes('g') || keys.includes('b')) {
+      return 'cc.Color'
+    }
+    // Size
+    if (keys.includes('width') && keys.includes('height')) {
+      return 'cc.Size'
+    }
+    // Vec3
+    if (keys.includes('x') && keys.includes('y') && keys.includes('z')) {
+      return 'cc.Vec3'
+    }
+    // Vec2
+    if (keys.includes('x') && keys.includes('y')) {
+      return 'cc.Vec2'
+    }
+    return undefined
+  }
+
   private async setNodeProperty(uuid: string, property: string, value: any): Promise<ToolResponse> {
     return new Promise((resolve) => {
+      const dumpType = this.inferValueDumpType(value, property)
+      const dump: any = { value }
+      if (dumpType) {
+        dump.type = dumpType
+      }
+
       // 尝试直接使用 Editor API 设置节点属性
       Editor.Message.request('scene', 'set-property', {
         uuid,
         path: property,
-        dump: {
-          value,
-        },
-      }).then(() => {
-        // Get comprehensive verification data including updated node info
-        this.getNodeInfo(uuid).then((nodeInfo) => {
-          resolve({
-            success: true,
-            message: `Property '${property}' updated successfully`,
-            data: {
-              nodeUuid: uuid,
-              property,
-              newValue: value,
-            },
-            verificationData: {
-              nodeInfo: nodeInfo.data,
-              changeDetails: {
-                property,
-                value,
-                timestamp: new Date().toISOString(),
-              },
-            },
-          })
-        }).catch(() => {
-          resolve({
-            success: true,
-            message: `Property '${property}' updated successfully (verification failed)`,
-          })
+        dump,
+      }).then(async () => {
+        // 验证：重新 query 节点确认值是否真的写入
+        let verified = false
+        let actualStoredValue: any
+        try {
+          const nodeData: any = await Editor.Message.request('scene', 'query-node', uuid)
+          if (nodeData && Array.isArray(nodeData.__comps__)) {
+            // 寻找挂在该节点上的某个组件（任意一个），从中读出该 property
+            for (const c of nodeData.__comps__) {
+              if (c && c.value && Object.prototype.hasOwnProperty.call(c.value, property)) {
+                actualStoredValue = c.value[property]
+                verified = JSON.stringify(actualStoredValue) === JSON.stringify(value)
+                if (verified)
+                  break
+              }
+            }
+          }
+        }
+        catch {
+          // ignore verify failure
+        }
+
+        // 验证不通过时再次尝试通过 set-property 走场景脚本，强制刷新
+        if (!verified) {
+          try {
+            await Editor.Message.request('scene', 'execute-scene-script', {
+              name: 'cocos-mcp-server',
+              method: 'setPropertyForce',
+              args: [uuid, property, value, dumpType],
+            })
+          }
+          catch {
+            // 忽略场景脚本失败
+          }
+        }
+
+        resolve({
+          success: true,
+          message: verified
+            ? `Property '${property}' updated successfully`
+            : `Property '${property}' write reported, but verification failed. Please re-open the scene.`,
+          data: {
+            nodeUuid: uuid,
+            property,
+            newValue: value,
+            dumpType,
+            verified,
+            actualStoredValue,
+          },
         })
       }).catch((err: Error) => {
         // 如果直接设置失败，尝试使用场景脚本
         const options = {
           name: 'cocos-mcp-server',
           method: 'setNodeProperty',
-          args: [uuid, property, value],
+          args: [uuid, property, value, dumpType],
         }
 
         Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {

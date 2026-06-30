@@ -352,6 +352,14 @@ export class SceneAdvancedTools implements ToolExecutor {
           required: ['assetUuid'],
         },
       },
+      {
+        name: 'query_scene_info',
+        description: 'Get current scene summary info (name, uuid, path, ready, dirty, child count, asset url)',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
     ]
   }
 
@@ -403,6 +411,8 @@ export class SceneAdvancedTools implements ToolExecutor {
         return await this.queryComponentHasScript(args.className)
       case 'query_nodes_by_asset_uuid':
         return await this.queryNodesByAssetUuid(args.assetUuid)
+      case 'query_scene_info':
+        return await this.querySceneInfo()
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -772,5 +782,36 @@ export class SceneAdvancedTools implements ToolExecutor {
         resolve({ success: false, error: err.message })
       })
     })
+  }
+
+  private async querySceneInfo(): Promise<ToolResponse> {
+    // 聚合多个独立 API 一次性返回场景状态，避免外部多次组合
+    const [tree, ready, dirty, currentScene] = await Promise.all([
+      Editor.Message.request('scene', 'query-node-tree').catch(() => null),
+      Editor.Message.request('scene', 'query-is-ready').catch(() => null),
+      Editor.Message.request('scene', 'query-dirty').catch(() => null),
+      Editor.Message.request('scene', 'query-current-scene').catch(() => null),
+    ])
+
+    if (!tree) {
+      return { success: false, error: 'No scene data available' }
+    }
+
+    const childCount = Array.isArray((tree as any).children) ? (tree as any).children.length : 0
+
+    return {
+      success: true,
+      data: {
+        name: (tree as any).name || 'Current Scene',
+        uuid: (tree as any).uuid,
+        type: (tree as any).type || 'cc.Scene',
+        active: (tree as any).active !== undefined ? (tree as any).active : true,
+        childCount,
+        ready: ready === true,
+        dirty: dirty === true,
+        assetUrl: (currentScene as any)?.url ?? null,
+        sceneAssetUuid: (currentScene as any)?.uuid ?? null,
+      },
+    }
   }
 }

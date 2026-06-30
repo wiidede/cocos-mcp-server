@@ -1,0 +1,339 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Dev Test Panel</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 16px;
+        background: #1f2228;
+        color: #e6e6e6;
+        font-size: 13px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #3a3f4b;
+        margin-bottom: 16px;
+      }
+
+      .header h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #f0f0f0;
+      }
+
+      .badge {
+        background: #4f46e5;
+        color: #fff;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 500;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      button {
+        background: #2c3038;
+        color: #e6e6e6;
+        border: 1px solid #3a3f4b;
+        padding: 6px 14px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: background 0.15s;
+      }
+
+      button:hover:not(:disabled) {
+        background: #3a3f4b;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      button.primary {
+        background: #4f46e5;
+        border-color: #4f46e5;
+      }
+
+      button.primary:hover:not(:disabled) {
+        background: #5d54ed;
+      }
+
+      button.danger {
+        background: #dc2626;
+        border-color: #dc2626;
+      }
+
+      .summary {
+        display: flex;
+        gap: 16px;
+        padding: 10px 14px;
+        background: #2a2e36;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-size: 12px;
+      }
+
+      .summary .item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .summary .item .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .dot.pass {
+        background: #10b981;
+      }
+      .dot.fail {
+        background: #ef4444;
+      }
+      .dot.running {
+        background: #f59e0b;
+        animation: pulse 1s infinite;
+      }
+      .dot.pending {
+        background: #6b7280;
+      }
+      .dot.skip {
+        background: #94a3b8;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      .test-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: calc(100vh - 260px);
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+
+      .test-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: #2a2e36;
+        border-radius: 4px;
+        border-left: 3px solid #4a4f5b;
+      }
+
+      .test-item.pass {
+        border-left-color: #10b981;
+      }
+      .test-item.fail {
+        border-left-color: #ef4444;
+      }
+      .test-item.running {
+        border-left-color: #f59e0b;
+      }
+      .test-item.skip {
+        border-left-color: #94a3b8;
+      }
+
+      .test-status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .test-status-dot.pass {
+        background: #10b981;
+      }
+      .test-status-dot.fail {
+        background: #ef4444;
+      }
+      .test-status-dot.running {
+        background: #f59e0b;
+      }
+      .test-status-dot.skip {
+        background: #94a3b8;
+      }
+      .test-status-dot.pending {
+        background: #6b7280;
+      }
+
+      .test-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .test-name {
+        font-weight: 500;
+        color: #f0f0f0;
+        font-size: 13px;
+        word-break: break-all;
+      }
+
+      .test-desc {
+        color: #8a8f9b;
+        font-size: 11px;
+        margin-top: 2px;
+      }
+
+      .test-duration {
+        color: #8a8f9b;
+        font-size: 11px;
+        font-family: ui-monospace, monospace;
+        white-space: nowrap;
+      }
+
+      .test-error {
+        margin-top: 8px;
+        padding: 8px 10px;
+        background: rgba(239, 68, 68, 0.1);
+        border-left: 2px solid #ef4444;
+        border-radius: 3px;
+        color: #fca5a5;
+        font-family: ui-monospace, monospace;
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .test-steps {
+        margin-top: 6px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .test-step {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        background: #3a3f4b;
+        color: #8a8f9b;
+      }
+
+      .test-step.ok {
+        background: rgba(16, 185, 129, 0.2);
+        color: #6ee7b7;
+      }
+      .test-step.fail {
+        background: rgba(239, 68, 68, 0.2);
+        color: #fca5a5;
+      }
+
+      .test-run-btn {
+        background: #2c3038;
+        border: 1px solid #3a3f4b;
+        color: #e6e6e6;
+        padding: 4px 10px;
+        font-size: 11px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+
+      .test-run-btn:hover:not(:disabled) {
+        background: #3a3f4b;
+      }
+
+      .empty {
+        text-align: center;
+        padding: 40px;
+        color: #6b7280;
+      }
+
+      .group-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: #8a8f9b;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 12px 0 6px 0;
+        padding-left: 4px;
+      }
+
+      .test-detail {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+      }
+
+      .test-detail .chevron {
+        font-size: 10px;
+        color: #6b7280;
+        transition: transform 0.15s;
+        user-select: none;
+      }
+
+      .test-detail.open .chevron {
+        transform: rotate(90deg);
+      }
+
+      .test-detail-body {
+        display: none;
+        margin-top: 8px;
+      }
+
+      .test-item.open .test-detail-body {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h2>Dev Test Panel</h2>
+      <span class="badge">仅开发时使用</span>
+    </div>
+
+    <div class="actions">
+      <button id="runAllBtn" class="primary">运行全部</button>
+      <button id="refreshBtn">刷新</button>
+      <button id="copyErrorsBtn" disabled>复制错误</button>
+      <button id="clearBtn">清除结果</button>
+    </div>
+
+    <div class="summary">
+      <div class="item">
+        <span class="dot pass"></span><span>通过: <span id="passCount">0</span></span>
+      </div>
+      <div class="item">
+        <span class="dot fail"></span><span>失败: <span id="failCount">0</span></span>
+      </div>
+      <div class="item">
+        <span class="dot running"></span><span>运行中: <span id="runningCount">0</span></span>
+      </div>
+      <div class="item">
+        <span class="dot pending"></span><span>总数: <span id="totalCount">0</span></span>
+      </div>
+    </div>
+
+    <div id="testList" class="test-list">
+      <div class="empty">加载中...</div>
+    </div>
+  </body>
+</html>

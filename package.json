@@ -45,6 +45,18 @@
         "width": 600,
         "height": 500
       }
+    },
+    "dev-test": {
+      "title": "Dev Test",
+      "type": "dockable",
+      "main": "dist/panels/dev-test/index.cjs",
+      "icon": "./static/icon.png",
+      "size": {
+        "min-width": 600,
+        "min-height": 400,
+        "width": 900,
+        "height": 700
+      }
     }
   },
   "contributions": {
@@ -53,12 +65,27 @@
         "path": "i18n:menu.extension/Cocos MCP Server",
         "label": "i18n:cocos-mcp-server.open_panel",
         "message": "open-panel"
+      },
+      {
+        "path": "i18n:menu.extension/Cocos MCP Server",
+        "label": "Dev Test Panel",
+        "message": "open-dev-test-panel"
       }
     ],
     "messages": {
       "open-panel": {
         "methods": [
           "openPanel"
+        ]
+      },
+      "open-dev-test-panel": {
+        "methods": [
+          "openDevTestPanel"
+        ]
+      },
+      "callTool": {
+        "methods": [
+          "callTool"
         ]
       },
       "open-tool-manager": {
