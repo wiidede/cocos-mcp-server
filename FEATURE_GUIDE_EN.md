@@ -8,7 +8,7 @@ This document provides detailed information about all available MCP tools and th
 
 ## Tool Categories
 
-The MCP server provides **158 tools** organized into 13 main categories by functionality:
+The MCP server provides **158 tools** organized into 9 main categories by functionality:
 
 1. [Scene Tools](#1-scene-tools)
 2. [Node Tools](#2-node-tools)
@@ -19,10 +19,6 @@ The MCP server provides **158 tools** organized into 13 main categories by funct
 7. [Preferences Tools](#7-preferences-tools)
 8. [Server Tools](#8-server-tools)
 9. [Broadcast Tools](#9-broadcast-tools)
-10. [Asset Advanced Tools](#10-asset-advanced-tools)
-11. [Reference Image Tools](#11-reference-image-tools)
-12. [Scene Advanced Tools](#12-scene-advanced-tools)
-13. [Scene View Tools](#13-scene-view-tools)
 
 ---
 

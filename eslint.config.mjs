@@ -7,5 +7,7 @@ export default antfu({
     'no-unused-vars': 'off',
     'unused-imports/no-unused-vars': 'off',
     'no-async-promise-executor': 'off',
+    'e18e/prefer-object-has-own': 'off',
+    'e18e/prefer-static-regex': 'off',
   },
 })

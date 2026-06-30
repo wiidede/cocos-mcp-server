@@ -2,6 +2,7 @@ import type { ToolConfig, ToolConfiguration, ToolManagerSettings } from '../type
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
+import { UnifiedTools } from './unified-tools'
 
 export class ToolManager {
   private settings: ToolManagerSettings
@@ -85,7 +86,6 @@ export class ToolManager {
   private initializeAvailableTools(): void {
     // 从MCP服务器获取真实的工具列表
     try {
-      const { UnifiedTools } = require('./unified-tools')
       const tools = new UnifiedTools()
       this.availableTools = []
       tools.getTools().forEach((tool: any) => {

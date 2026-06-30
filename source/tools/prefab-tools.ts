@@ -1135,7 +1135,7 @@ export class PrefabTools implements ToolExecutor {
     return children
   }
 
-  protected generateUUID(): string {
+  public generateUUID(): string {
     // 生成符合Cocos Creator格式的UUID
     const chars = '0123456789abcdef'
     let uuid = ''
@@ -1148,7 +1148,7 @@ export class PrefabTools implements ToolExecutor {
     return uuid
   }
 
-  private createPrefabData(nodeData: any, prefabName: string, prefabUuid: string): any[] {
+  public createPrefabData(nodeData: any, prefabName: string, prefabUuid: string): any[] {
     // 创建标准的预制体数据结构
     const prefabAsset = {
       __type__: 'cc.Prefab',
@@ -1481,7 +1481,7 @@ export class PrefabTools implements ToolExecutor {
     })
   }
 
-  private validatePrefabFormat(prefabData: any): { isValid: boolean, issues: string[], nodeCount: number, componentCount: number } {
+  public validatePrefabFormat(prefabData: any): { isValid: boolean, issues: string[], nodeCount: number, componentCount: number } {
     const issues: string[] = []
     let nodeCount = 0
     let componentCount = 0

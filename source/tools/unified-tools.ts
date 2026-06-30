@@ -1060,7 +1060,7 @@ export class UnifiedTools {
   }
 
   private getButtonEventFieldName(component: any): string {
-    if (component && Object.hasOwn(component, '_clickEvents')) {
+    if (component && Object.prototype.hasOwnProperty.call(component, '_clickEvents')) {
       return '_clickEvents'
     }
     return 'clickEvents'

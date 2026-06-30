@@ -251,7 +251,7 @@ export class ValidationTools implements ToolExecutor {
     if (jsonStr.includes('\n') || jsonStr.includes('\t')) {
       suggestions.push('Escape newlines and tabs properly')
     }
-    if (jsonStr.match(/,\s*[}\]]/)) {
+    if (/,\s*[}\]]/.test(jsonStr)) {
       suggestions.push('Remove trailing commas')
     }
 

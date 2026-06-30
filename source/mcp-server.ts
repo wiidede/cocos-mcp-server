@@ -1,6 +1,5 @@
 import type { MCPClient, MCPServerSettings, ServerStatus, ToolDefinition } from './types'
 import * as http from 'node:http'
-import * as url from 'node:url'
 import { UnifiedTools } from './tools/unified-tools'
 
 export class MCPServer {
@@ -113,7 +112,7 @@ export class MCPServer {
   }
 
   private async handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const parsedUrl = url.parse(req.url || '', true)
+    const parsedUrl = new URL(req.url || '', 'http://localhost')
     const pathname = parsedUrl.pathname
 
     // Set CORS headers
@@ -213,10 +212,12 @@ export class MCPServer {
           result = { tools: this.getAvailableTools() }
           break
         case 'tools/call':
+        {
           const { name, arguments: args } = params
           const toolResult = await this.executeToolCall(name, args)
           result = { content: [{ type: 'text', text: JSON.stringify(toolResult) }] }
           break
+        }
         case 'initialize':
           // MCP initialization
           result = {

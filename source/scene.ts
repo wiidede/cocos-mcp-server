@@ -1,5 +1,8 @@
+import type { Component, Label, MeshRenderer, Sprite } from 'cc'
 import { join } from 'node:path'
 import { assetManager, director, js, Material, Node, Scene, SpriteFrame } from 'cc'
+
+type ComponentConstructor = new (...args: unknown[]) => Component
 
 module.paths.push(join(Editor.App.path, 'node_modules'))
 
@@ -9,9 +12,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   createNewScene() {
     try {
-      const { director, Scene } = require('cc')
-      const scene = new Scene()
-      scene.name = 'New Scene'
+      const scene = new Scene('New Scene')
       director.runScene(scene)
       return { success: true, message: 'New scene created successfully' }
     }
@@ -37,7 +38,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
       }
 
       // Get component class
-      const ComponentClass = js.getClassByName(componentType)
+      const ComponentClass = js.getClassByName(componentType) as unknown as ComponentConstructor
       if (!ComponentClass) {
         return { success: false, error: `Component type ${componentType} not found` }
       }
@@ -70,7 +71,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
         return { success: false, error: `Node with UUID ${nodeUuid} not found` }
       }
 
-      const ComponentClass = js.getClassByName(componentType)
+      const ComponentClass = js.getClassByName(componentType) as unknown as ComponentConstructor
       if (!ComponentClass) {
         return { success: false, error: `Component type ${componentType} not found` }
       }
@@ -377,7 +378,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
       if (!node) {
         return { success: false, error: `Node with UUID ${nodeUuid} not found` }
       }
-      const ComponentClass = js.getClassByName(componentType)
+      const ComponentClass = js.getClassByName(componentType) as unknown as ComponentConstructor
       if (!ComponentClass) {
         return { success: false, error: `Component type ${componentType} not found` }
       }
@@ -390,56 +391,56 @@ export const methods: { [key: string]: (...any: any) => any } = {
         // 支持 value 为 uuid 或资源路径
         if (typeof value === 'string') {
           // 先尝试按 uuid 查找
-          assetManager.resources?.load(value, SpriteFrame, (err: any, spriteFrame: any) => {
+          assetManager.resources?.load(value, SpriteFrame, (err: Error | null, spriteFrame: SpriteFrame) => {
             if (!err && spriteFrame) {
-              component.spriteFrame = spriteFrame
+              (component as Sprite).spriteFrame = spriteFrame
             }
             else {
               // 尝试通过 uuid 加载
-              assetManager.loadAny({ uuid: value }, (err2: any, asset: any) => {
+              assetManager.loadAny({ uuid: value }, (err2: Error | null, asset: unknown) => {
                 if (!err2 && asset) {
-                  component.spriteFrame = asset
+                  (component as Sprite).spriteFrame = asset as SpriteFrame
                 }
                 else {
                   // 直接赋值（兼容已传入资源对象）
-                  component.spriteFrame = value
+                  (component as Sprite).spriteFrame = value as unknown as SpriteFrame
                 }
               })
             }
           })
         }
         else {
-          component.spriteFrame = value
+          (component as Sprite).spriteFrame = value as SpriteFrame
         }
       }
       else if (property === 'material' && (componentType === 'cc.Sprite' || componentType === 'cc.MeshRenderer')) {
         // 支持 value 为 uuid 或资源路径
         if (typeof value === 'string') {
-          assetManager.resources.load(value, Material, (err: any, material: any) => {
+          assetManager.resources?.load(value, Material, (err: Error | null, material: Material) => {
             if (!err && material) {
-              component.material = material
+              (component as Sprite | MeshRenderer).material = material
             }
             else {
-              assetManager.loadAny({ uuid: value }, (err2: any, asset: any) => {
+              assetManager.loadAny({ uuid: value }, (err2: Error | null, asset: unknown) => {
                 if (!err2 && asset) {
-                  component.material = asset
+                  (component as Sprite | MeshRenderer).material = asset as Material
                 }
                 else {
-                  component.material = value
+                  (component as Sprite | MeshRenderer).material = value as unknown as Material
                 }
               })
             }
           })
         }
         else {
-          component.material = value
+          (component as Sprite | MeshRenderer).material = value as Material
         }
       }
       else if (property === 'string' && (componentType === 'cc.Label' || componentType === 'cc.RichText')) {
-        component.string = value
+        (component as Label).string = String(value)
       }
       else {
-        component[property] = value
+        (component as unknown as Record<string, unknown>)[property] = value
       }
       // 可选：刷新 Inspector
       // Editor.Message.send('scene', 'snapshot');

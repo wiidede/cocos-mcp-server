@@ -8,7 +8,7 @@ Cocos Creator MCP 服务器是一个全面的 Model Context Protocol (MCP) 服�
 
 ## 工具分类
 
-MCP 服务器提供了 **158 个工具**，按功能分为 13 个主要类别：
+MCP 服务器提供了 **158 个工具**，按功能分为 9 个主要类别：
 
 1. [场景操作工具 (Scene Tools)](#1-场景操作工具-scene-tools)
 2. [节点操作工具 (Node Tools)](#2-节点操作工具-node-tools)
@@ -19,10 +19,6 @@ MCP 服务器提供了 **158 个工具**，按功能分为 13 个主要类别：
 7. [偏好设置工具 (Preferences Tools)](#7-偏好设置工具-preferences-tools)
 8. [服务器工具 (Server Tools)](#8-服务器工具-server-tools)
 9. [广播工具 (Broadcast Tools)](#9-广播工具-broadcast-tools)
-10. [高级资源工具 (Asset Advanced Tools)](#10-高级资源工具-asset-advanced-tools)
-11. [参考图像工具 (Reference Image Tools)](#11-参考图像工具-reference-image-tools)
-12. [高级场景工具 (Scene Advanced Tools)](#12-高级场景工具-scene-advanced-tools)
-13. [场景视图工具 (Scene View Tools)](#13-场景视图工具-scene-view-tools)
 
 ---
 

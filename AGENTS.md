@@ -95,22 +95,22 @@ pnpm run watch
 
 当前版本（v1.4.0）包含 **150+ 个工具**，分布在 14 个类别中：
 
-| 类别               | 主要工具示例                                          | 功能描述                     |
-| ------------------ | ----------------------------------------------------- | ---------------------------- |
-| `scene_*`          | get_current_scene, open_scene, save_scene             | 场景管理                     |
-| `node_*`           | create_node, get_node_info, set_node_property         | 节点操作                     |
-| `component_*`      | add_component, remove_component, set_component_property | 组件管理                     |
-| `prefab_*`         | create_prefab, instantiate_prefab, update_prefab      | 预制体操作                   |
-| `project_*`        | run_project, build_project, get_project_info          | 项目控制                     |
-| `debug_*`          | get_console_logs, get_performance_stats, validate_scene | 调试工具                     |
-| `asset_*`          | import_asset, get_asset_info, get_asset_dependencies  | 资源管理                     |
-| `preferences_*`    | open_preferences_settings, set_preferences_config     | 偏好设置                     |
-| `server_*`         | get_server_status, query_server_ip_list               | 服务器信息                   |
-| `broadcast_*`      | get_broadcast_log, listen_broadcast                   | 消息广播                     |
-| `referenceImage_*` | add_reference_image, set_reference_image_opacity      | 参考图片管理                 |
-| `sceneView_*`      | change_gizmo_tool, focus_camera_on_nodes              | 场景视图控制                 |
-| `sceneAdvanced_*`  | copy_node, paste_node, execute_component_method       | 高级场景操作                 |
-| `validation_*`     | validate_json_params, format_mcp_request              | 验证工具                     |
+| 类别               | 主要工具示例                                            | 功能描述     |
+| ------------------ | ------------------------------------------------------- | ------------ |
+| `scene_*`          | get_current_scene, open_scene, save_scene               | 场景管理     |
+| `node_*`           | create_node, get_node_info, set_node_property           | 节点操作     |
+| `component_*`      | add_component, remove_component, set_component_property | 组件管理     |
+| `prefab_*`         | create_prefab, instantiate_prefab, update_prefab        | 预制体操作   |
+| `project_*`        | run_project, build_project, get_project_info            | 项目控制     |
+| `debug_*`          | get_console_logs, get_performance_stats, validate_scene | 调试工具     |
+| `asset_*`          | import_asset, get_asset_info, get_asset_dependencies    | 资源管理     |
+| `preferences_*`    | open_preferences_settings, set_preferences_config       | 偏好设置     |
+| `server_*`         | get_server_status, query_server_ip_list                 | 服务器信息   |
+| `broadcast_*`      | get_broadcast_log, listen_broadcast                     | 消息广播     |
+| `referenceImage_*` | add_reference_image, set_reference_image_opacity        | 参考图片管理 |
+| `sceneView_*`      | change_gizmo_tool, focus_camera_on_nodes                | 场景视图控制 |
+| `sceneAdvanced_*`  | copy_node, paste_node, execute_component_method         | 高级场景操作 |
+| `validation_*`     | validate_json_params, format_mcp_request                | 验证工具     |
 
 ### 工具调用示例
 

@@ -1,7 +1,7 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 
 export class BroadcastTools implements ToolExecutor {
-  private listeners: Map<string, Function[]> = new Map()
+  private listeners: Map<string, Array<(data: any) => void>> = new Map()
   private messageLog: Array<{ message: string, data: any, timestamp: number }> = []
 
   constructor() {

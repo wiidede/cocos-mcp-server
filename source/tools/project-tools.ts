@@ -455,7 +455,7 @@ export class ProjectTools implements ToolExecutor {
 
       // Note: Preview module is not documented in official API
       // Using fallback approach - open build panel as alternative
-      Editor.Message.request('builder', 'open').then(() => {
+      Editor.Message.request('builder', 'open', 'default').then(() => {
         resolve({
           success: true,
           message: `Build panel opened. Preview functionality requires manual setup.`,
@@ -477,7 +477,7 @@ export class ProjectTools implements ToolExecutor {
 
       // Note: Builder module only supports 'open' and 'query-worker-ready'
       // Building requires manual interaction through the build panel
-      Editor.Message.request('builder', 'open').then(() => {
+      Editor.Message.request('builder', 'open', 'default').then(() => {
         resolve({
           success: true,
           message: `Build panel opened for ${args.platform}. Please configure and start build manually.`,
@@ -690,7 +690,7 @@ export class ProjectTools implements ToolExecutor {
 
   private async openBuildPanel(): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('builder', 'open').then(() => {
+      Editor.Message.request('builder', 'open', 'default').then(() => {
         resolve({
           success: true,
           message: 'Build panel opened successfully',
@@ -1060,7 +1060,7 @@ export class ProjectTools implements ToolExecutor {
 
         if (includeSubAssets && assetInfo) {
           // For image assets, try to get spriteFrame and texture sub-assets
-          if (assetInfo.type === 'cc.ImageAsset' || assetPath.match(/\.(png|jpg|jpeg|gif|tga|bmp|psd)$/i)) {
+          if (assetInfo.type === 'cc.ImageAsset' || /\.(?:png|jpg|jpeg|gif|tga|bmp|psd)$/i.test(assetPath)) {
             // Generate common sub-asset UUIDs
             const baseUuid = assetInfo.uuid
             const possibleSubAssets = [
