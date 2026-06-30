@@ -1,6 +1,6 @@
 # Cocos Creator MCP Server Plugin
 
-**[📖 English](README.EN.md)**  **[📖 中文](README.md)**
+**[📖 English](README.EN.md)** **[📖 中文](README.md)**
 
 A comprehensive MCP (Model Context Protocol) server plugin for Cocos Creator 3.8+, enabling AI assistants to interact with the Cocos Creator editor through standardized protocols. One-click installation and use, eliminating all cumbersome environments and configurations. Claude clients Claude CLI and Cursor have been tested, and other editors are also perfectly supported in theory.
 
@@ -10,15 +10,12 @@ A comprehensive MCP (Model Context Protocol) server plugin for Cocos Creator 3.8
 
 [<img width="503" height="351" alt="image" src="https://github.com/user-attachments/assets/f186ce14-9ffc-4a29-8761-48bdd7c1ea16" />](https://www.bilibili.com/video/BV1mB8dzfEw8?spm_id_from=333.788.recommend_more_video.0&vd_source=6b1ff659dd5f04a92cc6d14061e8bb92)
 
-
-
 ## Quick Links
 
 - **[📖 1.5 Tool Guide (English)](FEATURE_GUIDE_V1_5_EN.md)** - AI-oriented guide for the 50 unified tools
 - **[📖 1.5 工具说明 (中文)](FEATURE_GUIDE_V1_5_CN.md)** - AI-oriented guide for the 50 unified tools in Chinese
 - **[📖 Legacy Feature Guide (English)](FEATURE_GUIDE_EN.md)** - Legacy 1.4 and earlier tool reference
 - **[📖 完整功能指南 (中文)](FEATURE_GUIDE_CN.md)** - Legacy 1.4 and earlier tool reference in Chinese
-
 
 ## Changelog
 
@@ -33,7 +30,6 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **Interface Optimization**: All interface parameters are clearer, documentation is more complete, AI can understand and call more easily.
 - **Plugin Panel Optimization**: Panel UI is more concise, operations are more intuitive.
 - **Performance and Compatibility Improvements**: Overall architecture is more efficient, compatible with Cocos Creator 3.8.6 and all versions above.
-
 
 ## Tool System and Operation Codes
 
@@ -68,10 +64,10 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **server_info**: Server information
 - **broadcast_message**: Message broadcasting
 
-
 ### v1.4.0 - July 26, 2025
 
 #### 🎯 Major Functionality Fixes
+
 - **Complete Prefab Creation Fix**: Thoroughly resolved the issue of component/node/resource type reference loss during prefab creation
 - **Proper Reference Handling**: Implemented reference formats completely consistent with manually created prefabs
   - **Internal References**: Node and component references within prefabs correctly converted to `{"__id__": x}` format
@@ -80,24 +76,28 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **Component/Script Removal API Standardization**: Now, when removing a component or script, you must provide the component's cid (type field), not the script name or class name. AI and users should first use getComponents to get the type field (cid), then pass it to removeComponent. This ensures 100% accurate removal of all component and script types, compatible with all Cocos Creator versions.
 
 #### 🔧 Core Improvements
+
 - **Index Order Optimization**: Adjusted prefab object creation order to ensure consistency with Cocos Creator standard format
 - **Component Type Support**: Extended component reference detection to support all cc. prefixed component types (Label, Button, Sprite, etc.)
 - **UUID Mapping Mechanism**: Perfected internal UUID to index mapping system, ensuring correct reference relationships
 - **Property Format Standardization**: Fixed component property order and format, eliminating engine parsing errors
 
 #### 🐛 Bug Fixes
+
 - **Fixed Prefab Import Errors**: Resolved `Cannot read properties of undefined (reading '_name')` error
 - **Fixed Engine Compatibility**: Resolved `placeHolder.initDefault is not a function` error
 - **Fixed Property Overwriting**: Prevented critical properties like `_objFlags` from being overwritten by component data
 - **Fixed Reference Loss**: Ensured all types of references are correctly saved and loaded
 
 #### 📈 Feature Enhancements
-- **Complete Component Property Preservation**: All component properties including private properties (like _group, _density, etc.)
+
+- **Complete Component Property Preservation**: All component properties including private properties (like _group,_density, etc.)
 - **Child Node Structure Support**: Proper handling of prefab hierarchical structures and child node relationships
 - **Transform Property Processing**: Preserved node position, rotation, scale, and layer information
 - **Debug Information Optimization**: Added detailed reference processing logs for easier issue tracking
 
 #### 💡 Technical Breakthroughs
+
 - **Reference Type Identification**: Intelligently distinguish between internal and external references, avoiding invalid references
 - **Format Compatibility**: Generated prefabs are 100% compatible with manually created prefab formats
 - **Engine Integration**: Prefabs can be properly mounted to scenes without any runtime errors
@@ -108,6 +108,7 @@ Cocos store: https://store.cocos.com/app/detail/7941
 ### v1.3.0 - July 25, 2024
 
 #### 🆕 New Features
+
 - **Integrated Tool Management Panel**: Added comprehensive tool management functionality directly into the main control panel
 - **Tool Configuration System**: Implemented selective tool enabling/disabling with persistent configurations
 - **Dynamic Tool Loading**: Enhanced tool discovery to dynamically load all 158 available tools from the MCP server
@@ -115,6 +116,7 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **Configuration Persistence**: Automatic saving and loading of tool configurations across editor sessions
 
 #### 🔧 Improvements
+
 - **Unified Panel Interface**: Merged tool management into the main MCP server panel as a tab, eliminating the need for separate panels
 - **Enhanced Server Settings**: Improved server configuration management with better persistence and loading
 - **Vue 3 Integration**: Upgraded to Vue 3 Composition API for better reactivity and performance
@@ -122,6 +124,7 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **Improved UI/UX**: Enhanced visual design with proper dividers, distinct block styles, and non-transparent modal backgrounds
 
 #### 🐛 Bug Fixes
+
 - **Fixed Tool State Persistence**: Resolved issues where tool states would reset upon tab switching or panel re-opening
 - **Fixed Configuration Loading**: Corrected server settings loading issues and message registration problems
 - **Fixed Checkbox Interactions**: Resolved checkbox unchecking issues and improved reactivity
@@ -129,23 +132,24 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **Fixed IPC Communication**: Resolved various IPC communication issues between frontend and backend
 
 #### 🏗️ Technical Improvements
+
 - **Simplified Architecture**: Removed multi-configuration complexity, focusing on single configuration management
 - **Better Type Safety**: Enhanced TypeScript type definitions and interfaces
 - **Improved Data Synchronization**: Better synchronization between frontend UI state and backend tool manager
 - **Enhanced Debugging**: Added comprehensive logging and debugging capabilities
 
 #### 📊 Statistics
+
 - **Total Tools**: Increased from 151 to 158 tools
 - **Categories**: 13 tool categories with comprehensive coverage
 - **Editor Control**: Achieved 98% editor functionality coverage
 
 ### v1.2.0 - Previous Version
+
 - Initial release with 151 tools
 - Basic MCP server functionality
 - Scene, node, component, and prefab operations
 - Project control and debugging tools
-
-
 
 ## Quick Usage
 
@@ -180,7 +184,7 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 ```
 {
 
-  "mcpServers": { 
+  "mcpServers": {
 
    "cocos-creator": {
       "url": "http://localhost:3000/mcp"
@@ -193,11 +197,13 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 ## Features
 
 ### 🎯 Scene Operations (scene_*)
+
 - **scene_management**: Scene management - Get current scene, open/save/create/close scenes, support scene list query
 - **scene_hierarchy**: Scene hierarchy - Get complete scene structure, support component information inclusion
 - **scene_execution_control**: Execution control - Execute component methods, scene scripts, prefab synchronization
 
 ### 🎮 Node Operations (node_*)
+
 - **node_query**: Node query - Find nodes by name/pattern, get node information, detect 2D/3D types
 - **node_lifecycle**: Node lifecycle - Create/delete nodes, support component pre-installation, prefab instantiation
 - **node_transform**: Node transform - Modify node name, position, rotation, scale, visibility and other properties
@@ -206,27 +212,32 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 - **node_property_management**: Property management - Reset node properties, component properties, transform properties
 
 ### 🔧 Component Operations (component_*)
+
 - **component_manage**: Component management - Add/remove engine components (cc.Sprite, cc.Button, etc.)
 - **component_script**: Script components - Mount/remove custom script components
 - **component_query**: Component query - Get component list, detailed information, available component types
 - **set_component_property**: Property setting - Set single or multiple component property values
 
 ### 📦 Prefab Operations (prefab_*)
+
 - **prefab_browse**: Prefab browsing - List prefabs, view information, validate files
 - **prefab_lifecycle**: Prefab lifecycle - Create prefabs from nodes, delete prefabs
 - **prefab_instance**: Prefab instances - Instantiate to scene, unlink, apply changes, restore original
 - **prefab_edit**: Prefab editing - Enter/exit edit mode, save prefabs, test changes
 
 ### 🚀 Project Control (project_*)
+
 - **project_manage**: Project management - Run project, build project, get project information and settings
 - **project_build_system**: Build system - Control build panel, check build status, preview server management
 
 ### 🔍 Debug Tools (debug_*)
+
 - **debug_console**: Console management - Get/clear console logs, support filtering and limiting
 - **debug_logs**: Log analysis - Read/search/analyze project log files, support pattern matching
 - **debug_system**: System debugging - Get editor information, performance statistics, environment information
 
 ### 📁 Asset Management (asset_*)
+
 - **asset_manage**: Asset management - Batch import/delete assets, save metadata, generate URLs
 - **asset_analyze**: Asset analysis - Get dependency relationships, export asset manifests
 - **asset_system**: Asset system - Refresh assets, query asset database status
@@ -234,32 +245,39 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 - **asset_operations**: Asset operations - Create/copy/move/delete/save/re-import assets
 
 ### ⚙️ Preferences (preferences_*)
+
 - **preferences_manage**: Preferences management - Get/set editor preferences
 - **preferences_global**: Global settings - Manage global configuration and system settings
 
-### 🌐 Server and Broadcasting (server_* / broadcast_*)
+### 🌐 Server and Broadcasting (server__/ broadcast__)
+
 - **server_info**: Server information - Get server status, project details, environment information
 - **broadcast_message**: Message broadcasting - Listen and broadcast custom messages
 
 ### 🖼️ Reference Images (referenceImage_*)
+
 - **reference_image_manage**: Reference image management - Add/delete/manage reference images in scene view
 - **reference_image_view**: Reference image view - Control reference image display and editing
 
 ### 🎨 Scene View (sceneView_*)
+
 - **scene_view_control**: Scene view control - Control Gizmo tools, coordinate systems, view modes
 - **scene_view_tools**: Scene view tools - Manage various scene view tools and options
 
 ### ✅ Validation Tools (validation_*)
+
 - **validation_scene**: Scene validation - Validate scene integrity, check missing assets
 - **validation_asset**: Asset validation - Validate asset references, check asset integrity
 
 ### 🛠️ Tool Management
+
 - **Tool Configuration System**: Selectively enable/disable tools, support multiple configurations
 - **Configuration Persistence**: Automatically save and load tool configurations
 - **Configuration Import/Export**: Support tool configuration import/export functionality
 - **Real-time State Management**: Real-time tool state updates and synchronization
 
 ### 🚀 Core Advantages
+
 - **Unified Operation Codes**: All tools adopt "category_operation" naming, unified parameter Schema
 - **High Reusability**: 50 core tools cover 99% editor functionality
 - **AI-Friendly**: Clear parameters, complete documentation, simple calling
@@ -323,10 +341,10 @@ The server exposes an HTTP endpoint at `http://localhost:3000/mcp` (or your conf
 
 AI assistants can connect using the MCP protocol and access all available tools.
 
-
 ## Development
 
 ### Project Structure
+
 ```
 cocos-mcp-server/
 ├── source/                    # TypeScript source files
@@ -380,6 +398,7 @@ npm run build
 ### TypeScript Support
 
 The plugin is fully written in TypeScript with:
+
 - Strict type checking enabled
 - Comprehensive type definitions for all APIs
 - IntelliSense support for development
@@ -403,14 +422,14 @@ Enable debug logging in the plugin panel for detailed operation logs.
 ```json
 {
   "tool": "debug_get_console_logs",
-  "arguments": {"limit": 50, "filter": "error"}
+  "arguments": { "limit": 50, "filter": "error" }
 }
 ```
 
 ```json
 {
   "tool": "debug_validate_scene",
-  "arguments": {"checkMissingAssets": true}
+  "arguments": { "checkMissingAssets": true }
 }
 ```
 
@@ -425,4 +444,5 @@ Enable debug logging in the plugin panel for detailed operation logs.
 This plug-in is for Cocos Creator project use, and the source code is packaged together, which can be used for learning and communication. It is not encrypted. It can support your own secondary development and optimization. Any code of this project or its derivative code cannot be used for any commercial purpose or resale. If you need commercial use, please contact me.
 
 ## Contact me to join the group
+
 <img alt="image" src="https://github.com/user-attachments/assets/a276682c-4586-480c-90e5-6db132e89e0f" width="400" height="400" />

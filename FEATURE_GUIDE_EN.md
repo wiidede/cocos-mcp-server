@@ -29,6 +29,7 @@ The MCP server provides **158 tools** organized into 13 main categories by funct
 ## 1. Scene Tools
 
 ### 1.1 scene_get_current_scene
+
 Get current scene information
 
 **Parameters**: None
@@ -36,6 +37,7 @@ Get current scene information
 **Returns**: Current scene name, UUID, type, active status, and node count
 
 **Example**:
+
 ```json
 {
   "tool": "scene_get_current_scene",
@@ -44,6 +46,7 @@ Get current scene information
 ```
 
 ### 1.2 scene_get_scene_list
+
 Get all scenes in the project
 
 **Parameters**: None
@@ -51,6 +54,7 @@ Get all scenes in the project
 **Returns**: List of all scenes in the project, including names, paths, and UUIDs
 
 **Example**:
+
 ```json
 {
   "tool": "scene_get_scene_list",
@@ -59,12 +63,15 @@ Get all scenes in the project
 ```
 
 ### 1.3 scene_open_scene
+
 Open a scene by path
 
 **Parameters**:
+
 - `scenePath` (string, required): Scene file path
 
 **Example**:
+
 ```json
 {
   "tool": "scene_open_scene",
@@ -75,11 +82,13 @@ Open a scene by path
 ```
 
 ### 1.4 scene_save_scene
+
 Save current scene
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "scene_save_scene",
@@ -88,13 +97,16 @@ Save current scene
 ```
 
 ### 1.5 scene_create_scene
+
 Create a new scene asset
 
 **Parameters**:
+
 - `sceneName` (string, required): Name of the new scene
 - `savePath` (string, required): Path to save the scene
 
 **Example**:
+
 ```json
 {
   "tool": "scene_create_scene",
@@ -106,12 +118,15 @@ Create a new scene asset
 ```
 
 ### 1.6 scene_save_scene_as
+
 Save scene as a new file
 
 **Parameters**:
+
 - `path` (string, required): Path to save the scene
 
 **Example**:
+
 ```json
 {
   "tool": "scene_save_scene_as",
@@ -122,11 +137,13 @@ Save scene as a new file
 ```
 
 ### 1.7 scene_close_scene
+
 Close current scene
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "scene_close_scene",
@@ -135,12 +152,15 @@ Close current scene
 ```
 
 ### 1.8 scene_get_scene_hierarchy
+
 Get the complete hierarchy of current scene
 
 **Parameters**:
+
 - `includeComponents` (boolean, optional): Whether to include component information, defaults to false
 
 **Example**:
+
 ```json
 {
   "tool": "scene_get_scene_hierarchy",
@@ -155,20 +175,24 @@ Get the complete hierarchy of current scene
 ## 2. Node Tools
 
 ### 2.1 node_create_node
+
 Create a new node in the scene
 
 **Parameters**:
+
 - `name` (string, required): Node name
 - `parentUuid` (string, **strongly recommended**): Parent node UUID. **Important**: It is strongly recommended to always provide this parameter. Use `get_current_scene` or `get_all_nodes` to find parent node UUIDs. If not provided, the node will be created at the scene root.
 - `nodeType` (string, optional): Node type, options: `Node`, `2DNode`, `3DNode`, defaults to `Node`
 - `siblingIndex` (number, optional): Sibling index, -1 means append at end, defaults to -1
 
 **Important Note**: To ensure the node is created at the expected location, always provide the `parentUuid` parameter. You can obtain parent node UUIDs by:
+
 - Using `scene_get_current_scene` to get the scene root node UUID
 - Using `node_get_all_nodes` to view all nodes and their UUIDs
 - Using `node_find_node_by_name` to find specific node UUIDs
 
 **Example**:
+
 ```json
 {
   "tool": "node_create_node",
@@ -181,12 +205,15 @@ Create a new node in the scene
 ```
 
 ### 2.2 node_get_node_info
+
 Get node information by UUID
 
 **Parameters**:
+
 - `uuid` (string, required): Node UUID
 
 **Example**:
+
 ```json
 {
   "tool": "node_get_node_info",
@@ -197,13 +224,16 @@ Get node information by UUID
 ```
 
 ### 2.3 node_find_nodes
+
 Find nodes by name pattern
 
 **Parameters**:
+
 - `pattern` (string, required): Name pattern to search
 - `exactMatch` (boolean, optional): Whether to match exactly, defaults to false
 
 **Example**:
+
 ```json
 {
   "tool": "node_find_nodes",
@@ -215,12 +245,15 @@ Find nodes by name pattern
 ```
 
 ### 2.4 node_find_node_by_name
+
 Find the first node by exact name
 
 **Parameters**:
+
 - `name` (string, required): Node name to find
 
 **Example**:
+
 ```json
 {
   "tool": "node_find_node_by_name",
@@ -231,11 +264,13 @@ Find the first node by exact name
 ```
 
 ### 2.5 node_get_all_nodes
+
 Get all nodes in the scene with their UUIDs
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "node_get_all_nodes",
@@ -244,32 +279,38 @@ Get all nodes in the scene with their UUIDs
 ```
 
 ### 2.6 node_set_node_property
+
 Set node property value
 
 **Parameters**:
+
 - `uuid` (string, required): Node UUID
 - `property` (string, required): Property name (e.g., position, rotation, scale, active)
 - `value` (any, required): Property value
 
 **Example**:
+
 ```json
 {
   "tool": "node_set_node_property",
   "arguments": {
     "uuid": "node-uuid-here",
     "property": "position",
-    "value": {"x": 100, "y": 200, "z": 0}
+    "value": { "x": 100, "y": 200, "z": 0 }
   }
 }
 ```
 
 ### 2.7 node_delete_node
+
 Delete a node from the scene
 
 **Parameters**:
+
 - `uuid` (string, required): UUID of the node to delete
 
 **Example**:
+
 ```json
 {
   "tool": "node_delete_node",
@@ -280,14 +321,17 @@ Delete a node from the scene
 ```
 
 ### 2.8 node_move_node
+
 Move a node to a new parent
 
 **Parameters**:
+
 - `nodeUuid` (string, required): UUID of the node to move
 - `newParentUuid` (string, required): New parent node UUID
 - `siblingIndex` (number, optional): Sibling index in the new parent, defaults to -1
 
 **Example**:
+
 ```json
 {
   "tool": "node_move_node",
@@ -300,13 +344,16 @@ Move a node to a new parent
 ```
 
 ### 2.9 node_duplicate_node
+
 Duplicate a node
 
 **Parameters**:
+
 - `uuid` (string, required): UUID of the node to duplicate
 - `includeChildren` (boolean, optional): Whether to include child nodes, defaults to true
 
 **Example**:
+
 ```json
 {
   "tool": "node_duplicate_node",
@@ -322,18 +369,22 @@ Duplicate a node
 ## 3. Component Management Tools
 
 ### 3.1 component_add_component
+
 Add a component to a specific node
 
 **Parameters**:
+
 - `nodeUuid` (string, **required**): Target node UUID. **Important**: You must specify the exact node to add the component to. Use `get_all_nodes` or `find_node_by_name` to get the UUID of the desired node.
 - `componentType` (string, required): Component type (e.g., cc.Sprite, cc.Label, cc.Button)
 
 **Important Note**: Before adding a component, ensure:
+
 1. First use `node_get_all_nodes` or `node_find_node_by_name` to find the target node's UUID
 2. Verify the node exists and the UUID is correct
 3. Choose the appropriate component type
 
 **Example**:
+
 ```json
 {
   "tool": "component_add_component",
@@ -345,13 +396,16 @@ Add a component to a specific node
 ```
 
 ### 3.2 component_remove_component
+
 Remove a component from a node
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Node UUID
 - `componentType` (string, required): Component type to remove
 
 **Example**:
+
 ```json
 {
   "tool": "component_remove_component",
@@ -363,12 +417,15 @@ Remove a component from a node
 ```
 
 ### 3.3 component_get_components
+
 Get all components of a node
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Node UUID
 
 **Example**:
+
 ```json
 {
   "tool": "component_get_components",
@@ -379,13 +436,16 @@ Get all components of a node
 ```
 
 ### 3.4 component_get_component_info
+
 Get specific component information
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Node UUID
 - `componentType` (string, required): Component type to get info for
 
 **Example**:
+
 ```json
 {
   "tool": "component_get_component_info",
@@ -397,15 +457,18 @@ Get specific component information
 ```
 
 ### 3.5 component_set_component_property
+
 Set component property value
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Node UUID
 - `componentType` (string, required): Component type
 - `property` (string, required): Property name
 - `value` (any, required): Property value
 
 **Example**:
+
 ```json
 {
   "tool": "component_set_component_property",
@@ -419,13 +482,16 @@ Set component property value
 ```
 
 ### 3.6 component_attach_script
+
 Attach a script component to a node
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Node UUID
 - `scriptPath` (string, required): Script asset path
 
 **Example**:
+
 ```json
 {
   "tool": "component_attach_script",
@@ -437,12 +503,15 @@ Attach a script component to a node
 ```
 
 ### 3.7 component_get_available_components
+
 Get list of available component types
 
 **Parameters**:
+
 - `category` (string, optional): Component category filter, options: `all`, `renderer`, `ui`, `physics`, `animation`, `audio`, defaults to `all`
 
 **Example**:
+
 ```json
 {
   "tool": "component_get_available_components",
@@ -459,12 +528,15 @@ Get list of available component types
 **⚠️ Known Issue**: When using standard Cocos Creator API for prefab instantiation, complex prefabs with child nodes may not be properly restored. While prefab creation functionality can correctly save all child node information, the instantiation process through `create-node` with `assetUuid` has limitations that may result in missing child nodes in the instantiated prefab.
 
 ### 4.1 prefab_get_prefab_list
+
 Get all prefabs in the project
 
 **Parameters**:
+
 - `folder` (string, optional): Search folder path, defaults to `db://assets`
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_get_prefab_list",
@@ -475,12 +547,15 @@ Get all prefabs in the project
 ```
 
 ### 4.2 prefab_load_prefab
+
 Load a prefab by path
 
 **Parameters**:
+
 - `prefabPath` (string, required): Prefab asset path
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_load_prefab",
@@ -491,21 +566,24 @@ Load a prefab by path
 ```
 
 ### 4.3 prefab_instantiate_prefab
+
 Instantiate a prefab in the scene
 
 **Parameters**:
+
 - `prefabPath` (string, required): Prefab asset path
 - `parentUuid` (string, optional): Parent node UUID
 - `position` (object, optional): Initial position with x, y, z properties
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_instantiate_prefab",
   "arguments": {
     "prefabPath": "db://assets/prefabs/Enemy.prefab",
     "parentUuid": "parent-uuid-here",
-    "position": {"x": 100, "y": 200, "z": 0}
+    "position": { "x": 100, "y": 200, "z": 0 }
   }
 }
 ```
@@ -513,14 +591,17 @@ Instantiate a prefab in the scene
 **⚠️ Functionality Limitation**: Complex prefabs with child nodes may not instantiate correctly. Due to Cocos Creator API limitations in the standard `create-node` method using `assetUuid`, only the root node may be created, and child nodes may be lost. This is a known issue with the current implementation.
 
 ### 4.4 prefab_create_prefab
+
 Create a prefab from a node
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Source node UUID
 - `savePath` (string, required): Path to save the prefab
 - `prefabName` (string, required): Prefab name
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_create_prefab",
@@ -533,13 +614,16 @@ Create a prefab from a node
 ```
 
 ### 4.5 prefab_create_prefab_from_node
+
 Create a prefab from a node (alias for create_prefab)
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Source node UUID
 - `prefabPath` (string, required): Path to save the prefab
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_create_prefab_from_node",
@@ -551,13 +635,16 @@ Create a prefab from a node (alias for create_prefab)
 ```
 
 ### 4.6 prefab_update_prefab
+
 Update an existing prefab
 
 **Parameters**:
+
 - `prefabPath` (string, required): Prefab asset path
 - `nodeUuid` (string, required): Node UUID containing changes
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_update_prefab",
@@ -569,12 +656,15 @@ Update an existing prefab
 ```
 
 ### 4.7 prefab_revert_prefab
+
 Revert a prefab instance to its original state
 
 **Parameters**:
+
 - `nodeUuid` (string, required): Prefab instance node UUID
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_revert_prefab",
@@ -585,12 +675,15 @@ Revert a prefab instance to its original state
 ```
 
 ### 4.8 prefab_get_prefab_info
+
 Get detailed prefab information
 
 **Parameters**:
+
 - `prefabPath` (string, required): Prefab asset path
 
 **Example**:
+
 ```json
 {
   "tool": "prefab_get_prefab_info",
@@ -605,12 +698,15 @@ Get detailed prefab information
 ## 5. Project Control Tools
 
 ### 5.1 project_run_project
+
 Run the project in preview mode
 
 **Parameters**:
+
 - `platform` (string, optional): Target platform, options: `browser`, `simulator`, `preview`, defaults to `browser`
 
 **Example**:
+
 ```json
 {
   "tool": "project_run_project",
@@ -621,13 +717,16 @@ Run the project in preview mode
 ```
 
 ### 5.2 project_build_project
+
 Build the project
 
 **Parameters**:
+
 - `platform` (string, required): Build platform, options: `web-mobile`, `web-desktop`, `ios`, `android`, `windows`, `mac`
 - `debug` (boolean, optional): Whether to build in debug mode, defaults to true
 
 **Example**:
+
 ```json
 {
   "tool": "project_build_project",
@@ -639,11 +738,13 @@ Build the project
 ```
 
 ### 5.3 project_get_project_info
+
 Get project information
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "project_get_project_info",
@@ -652,12 +753,15 @@ Get project information
 ```
 
 ### 5.4 project_get_project_settings
+
 Get project settings
 
 **Parameters**:
+
 - `category` (string, optional): Settings category, options: `general`, `physics`, `render`, `assets`, defaults to `general`
 
 **Example**:
+
 ```json
 {
   "tool": "project_get_project_settings",
@@ -668,12 +772,15 @@ Get project settings
 ```
 
 ### 5.5 project_refresh_assets
+
 Refresh the asset database
 
 **Parameters**:
+
 - `folder` (string, optional): Specific folder to refresh
 
 **Example**:
+
 ```json
 {
   "tool": "project_refresh_assets",
@@ -684,13 +791,16 @@ Refresh the asset database
 ```
 
 ### 5.6 project_import_asset
+
 Import an asset file
 
 **Parameters**:
+
 - `sourcePath` (string, required): Source file path
 - `targetFolder` (string, required): Target folder in assets
 
 **Example**:
+
 ```json
 {
   "tool": "project_import_asset",
@@ -702,12 +812,15 @@ Import an asset file
 ```
 
 ### 5.7 project_get_asset_info
+
 Get asset information
 
 **Parameters**:
+
 - `assetPath` (string, required): Asset path
 
 **Example**:
+
 ```json
 {
   "tool": "project_get_asset_info",
@@ -718,13 +831,16 @@ Get asset information
 ```
 
 ### 5.8 project_get_assets
+
 Get assets by type
 
 **Parameters**:
+
 - `type` (string, optional): Asset type filter, options: `all`, `scene`, `prefab`, `script`, `texture`, `material`, `mesh`, `audio`, `animation`, defaults to `all`
 - `folder` (string, optional): Search folder, defaults to `db://assets`
 
 **Example**:
+
 ```json
 {
   "tool": "project_get_assets",
@@ -736,11 +852,13 @@ Get assets by type
 ```
 
 ### 5.9 project_get_build_settings
+
 Get build settings
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "project_get_build_settings",
@@ -749,11 +867,13 @@ Get build settings
 ```
 
 ### 5.10 project_open_build_panel
+
 Open the build panel in the editor
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "project_open_build_panel",
@@ -762,11 +882,13 @@ Open the build panel in the editor
 ```
 
 ### 5.11 project_check_builder_status
+
 Check if the builder worker process is ready
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "project_check_builder_status",
@@ -775,12 +897,15 @@ Check if the builder worker process is ready
 ```
 
 ### 5.12 project_start_preview_server
+
 Start the preview server
 
 **Parameters**:
+
 - `port` (number, optional): Preview server port, defaults to 7456
 
 **Example**:
+
 ```json
 {
   "tool": "project_start_preview_server",
@@ -791,11 +916,13 @@ Start the preview server
 ```
 
 ### 5.13 project_stop_preview_server
+
 Stop the preview server
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "project_stop_preview_server",
@@ -804,14 +931,17 @@ Stop the preview server
 ```
 
 ### 5.14 project_create_asset
+
 Create a new asset file or folder
 
 **Parameters**:
+
 - `url` (string, required): Asset URL
 - `content` (string, optional): File content, null means create folder
 - `overwrite` (boolean, optional): Whether to overwrite existing file, defaults to false
 
 **Example**:
+
 ```json
 {
   "tool": "project_create_asset",
@@ -824,14 +954,17 @@ Create a new asset file or folder
 ```
 
 ### 5.15 project_copy_asset
+
 Copy an asset to another location
 
 **Parameters**:
+
 - `source` (string, required): Source asset URL
 - `target` (string, required): Target location URL
 - `overwrite` (boolean, optional): Whether to overwrite existing file, defaults to false
 
 **Example**:
+
 ```json
 {
   "tool": "project_copy_asset",
@@ -844,14 +977,17 @@ Copy an asset to another location
 ```
 
 ### 5.16 project_move_asset
+
 Move an asset to another location
 
 **Parameters**:
+
 - `source` (string, required): Source asset URL
 - `target` (string, required): Target location URL
 - `overwrite` (boolean, optional): Whether to overwrite existing file, defaults to false
 
 **Example**:
+
 ```json
 {
   "tool": "project_move_asset",
@@ -864,12 +1000,15 @@ Move an asset to another location
 ```
 
 ### 5.17 project_delete_asset
+
 Delete an asset
 
 **Parameters**:
+
 - `url` (string, required): Asset URL to delete
 
 **Example**:
+
 ```json
 {
   "tool": "project_delete_asset",
@@ -880,13 +1019,16 @@ Delete an asset
 ```
 
 ### 5.18 project_save_asset
+
 Save asset content
 
 **Parameters**:
+
 - `url` (string, required): Asset URL
 - `content` (string, required): Asset content
 
 **Example**:
+
 ```json
 {
   "tool": "project_save_asset",
@@ -898,12 +1040,15 @@ Save asset content
 ```
 
 ### 5.19 project_reimport_asset
+
 Reimport an asset
 
 **Parameters**:
+
 - `url` (string, required): Asset URL to reimport
 
 **Example**:
+
 ```json
 {
   "tool": "project_reimport_asset",
@@ -914,12 +1059,15 @@ Reimport an asset
 ```
 
 ### 5.20 project_query_asset_path
+
 Get asset disk path
 
 **Parameters**:
+
 - `url` (string, required): Asset URL
 
 **Example**:
+
 ```json
 {
   "tool": "project_query_asset_path",
@@ -930,12 +1078,15 @@ Get asset disk path
 ```
 
 ### 5.21 project_query_asset_uuid
+
 Get asset UUID from URL
 
 **Parameters**:
+
 - `url` (string, required): Asset URL
 
 **Example**:
+
 ```json
 {
   "tool": "project_query_asset_uuid",
@@ -946,12 +1097,15 @@ Get asset UUID from URL
 ```
 
 ### 5.22 project_query_asset_url
+
 Get asset URL from UUID
 
 **Parameters**:
+
 - `uuid` (string, required): Asset UUID
 
 **Example**:
+
 ```json
 {
   "tool": "project_query_asset_url",
@@ -966,13 +1120,16 @@ Get asset URL from UUID
 ## 6. Debug Tools
 
 ### 6.1 debug_get_console_logs
+
 Get editor console logs
 
 **Parameters**:
+
 - `limit` (number, optional): Number of latest logs to retrieve, defaults to 100
 - `filter` (string, optional): Filter logs by type, options: `all`, `log`, `warn`, `error`, `info`, defaults to `all`
 
 **Example**:
+
 ```json
 {
   "tool": "debug_get_console_logs",
@@ -984,11 +1141,13 @@ Get editor console logs
 ```
 
 ### 6.2 debug_clear_console
+
 Clear the editor console
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "debug_clear_console",
@@ -997,12 +1156,15 @@ Clear the editor console
 ```
 
 ### 6.3 debug_execute_script
+
 Execute JavaScript code in scene context
 
 **Parameters**:
+
 - `script` (string, required): JavaScript code to execute
 
 **Example**:
+
 ```json
 {
   "tool": "debug_execute_script",
@@ -1013,13 +1175,16 @@ Execute JavaScript code in scene context
 ```
 
 ### 6.4 debug_get_node_tree
+
 Get detailed node tree for debugging
 
 **Parameters**:
+
 - `rootUuid` (string, optional): Root node UUID, if not provided uses scene root node
 - `maxDepth` (number, optional): Maximum tree depth, defaults to 10
 
 **Example**:
+
 ```json
 {
   "tool": "debug_get_node_tree",
@@ -1031,11 +1196,13 @@ Get detailed node tree for debugging
 ```
 
 ### 6.5 debug_get_performance_stats
+
 Get performance statistics
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "debug_get_performance_stats",
@@ -1044,13 +1211,16 @@ Get performance statistics
 ```
 
 ### 6.6 debug_validate_scene
+
 Validate if the current scene has issues
 
 **Parameters**:
+
 - `checkMissingAssets` (boolean, optional): Check for missing asset references, defaults to true
 - `checkPerformance` (boolean, optional): Check for performance issues, defaults to true
 
 **Example**:
+
 ```json
 {
   "tool": "debug_validate_scene",
@@ -1062,11 +1232,13 @@ Validate if the current scene has issues
 ```
 
 ### 6.7 debug_get_editor_info
+
 Get editor and environment information
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "debug_get_editor_info",
@@ -1075,14 +1247,17 @@ Get editor and environment information
 ```
 
 ### 6.8 debug_get_project_logs
+
 Get project logs from temp/logs/project.log file
 
 **Parameters**:
+
 - `lines` (number, optional): Number of lines to read from the end of the log file, default is 100, range: 1-10000
 - `filterKeyword` (string, optional): Filter logs by specific keyword
 - `logLevel` (string, optional): Filter by log level, options: `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL`, defaults to `ALL`
 
 **Example**:
+
 ```json
 {
   "tool": "debug_get_project_logs",
@@ -1095,6 +1270,7 @@ Get project logs from temp/logs/project.log file
 ```
 
 ### 6.9 debug_get_log_file_info
+
 Get project log file information
 
 **Parameters**: None
@@ -1102,6 +1278,7 @@ Get project log file information
 **Returns**: File size, last modified time, line count, and file path information
 
 **Example**:
+
 ```json
 {
   "tool": "debug_get_log_file_info",
@@ -1110,14 +1287,17 @@ Get project log file information
 ```
 
 ### 6.10 debug_search_project_logs
+
 Search for specific patterns or errors in project logs
 
 **Parameters**:
+
 - `pattern` (string, required): Search pattern (supports regex)
 - `maxResults` (number, optional): Maximum number of matching results, defaults to 20, range: 1-100
 - `contextLines` (number, optional): Number of context lines to show around each match, defaults to 2, range: 0-10
 
 **Example**:
+
 ```json
 {
   "tool": "debug_search_project_logs",
@@ -1134,12 +1314,15 @@ Search for specific patterns or errors in project logs
 ## 7. Preferences Tools
 
 ### 7.1 preferences_get_preferences
+
 Get editor preferences
 
 **Parameters**:
+
 - `key` (string, optional): Specific preference key to get
 
 **Example**:
+
 ```json
 {
   "tool": "preferences_get_preferences",
@@ -1150,13 +1333,16 @@ Get editor preferences
 ```
 
 ### 7.2 preferences_set_preferences
+
 Set editor preferences
 
 **Parameters**:
+
 - `key` (string, required): Preference key to set
 - `value` (any, required): Preference value to set
 
 **Example**:
+
 ```json
 {
   "tool": "preferences_set_preferences",
@@ -1168,12 +1354,15 @@ Set editor preferences
 ```
 
 ### 7.3 preferences_get_global_preferences
+
 Get global editor preferences
 
 **Parameters**:
+
 - `key` (string, optional): Global preference key to get
 
 **Example**:
+
 ```json
 {
   "tool": "preferences_get_global_preferences",
@@ -1184,13 +1373,16 @@ Get global editor preferences
 ```
 
 ### 7.4 preferences_set_global_preferences
+
 Set global editor preferences
 
 **Parameters**:
+
 - `key` (string, required): Global preference key to set
 - `value` (any, required): Global preference value to set
 
 **Example**:
+
 ```json
 {
   "tool": "preferences_set_global_preferences",
@@ -1202,11 +1394,13 @@ Set global editor preferences
 ```
 
 ### 7.5 preferences_get_recent_projects
+
 Get recently opened projects
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "preferences_get_recent_projects",
@@ -1215,11 +1409,13 @@ Get recently opened projects
 ```
 
 ### 7.6 preferences_clear_recent_projects
+
 Clear the list of recently opened projects
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "preferences_clear_recent_projects",
@@ -1232,11 +1428,13 @@ Clear the list of recently opened projects
 ## 8. Server Tools
 
 ### 8.1 server_get_server_info
+
 Get server information
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_get_server_info",
@@ -1245,29 +1443,34 @@ Get server information
 ```
 
 ### 8.2 server_broadcast_custom_message
+
 Broadcast a custom message
 
 **Parameters**:
+
 - `message` (string, required): Message name
 - `data` (any, optional): Message data
 
 **Example**:
+
 ```json
 {
   "tool": "server_broadcast_custom_message",
   "arguments": {
     "message": "custom_event",
-    "data": {"type": "test", "value": 123}
+    "data": { "type": "test", "value": 123 }
   }
 }
 ```
 
 ### 8.3 server_get_editor_version
+
 Get editor version information
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_get_editor_version",
@@ -1276,11 +1479,13 @@ Get editor version information
 ```
 
 ### 8.4 server_get_project_name
+
 Get current project name
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_get_project_name",
@@ -1289,11 +1494,13 @@ Get current project name
 ```
 
 ### 8.5 server_get_project_path
+
 Get current project path
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_get_project_path",
@@ -1302,11 +1509,13 @@ Get current project path
 ```
 
 ### 8.6 server_get_project_uuid
+
 Get current project UUID
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_get_project_uuid",
@@ -1315,11 +1524,13 @@ Get current project UUID
 ```
 
 ### 8.7 server_restart_editor
+
 Request to restart the editor
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_restart_editor",
@@ -1328,11 +1539,13 @@ Request to restart the editor
 ```
 
 ### 8.8 server_quit_editor
+
 Request to quit the editor
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "server_quit_editor",
@@ -1345,13 +1558,16 @@ Request to quit the editor
 ## 9. Broadcast Tools
 
 ### 9.1 broadcast_get_broadcast_log
+
 Get recent broadcast message log
 
 **Parameters**:
+
 - `limit` (number, optional): Number of latest messages to return, defaults to 50
 - `messageType` (string, optional): Filter by message type
 
 **Example**:
+
 ```json
 {
   "tool": "broadcast_get_broadcast_log",
@@ -1363,12 +1579,15 @@ Get recent broadcast message log
 ```
 
 ### 9.2 broadcast_listen_broadcast
+
 Start listening for specific broadcast messages
 
 **Parameters**:
+
 - `messageType` (string, required): Message type to listen for
 
 **Example**:
+
 ```json
 {
   "tool": "broadcast_listen_broadcast",
@@ -1379,12 +1598,15 @@ Start listening for specific broadcast messages
 ```
 
 ### 9.3 broadcast_stop_listening
+
 Stop listening for specific broadcast messages
 
 **Parameters**:
+
 - `messageType` (string, required): Message type to stop listening for
 
 **Example**:
+
 ```json
 {
   "tool": "broadcast_stop_listening",
@@ -1395,11 +1617,13 @@ Stop listening for specific broadcast messages
 ```
 
 ### 9.4 broadcast_clear_broadcast_log
+
 Clear broadcast message log
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "broadcast_clear_broadcast_log",
@@ -1408,11 +1632,13 @@ Clear broadcast message log
 ```
 
 ### 9.5 broadcast_get_active_listeners
+
 Get list of active broadcast listeners
 
 **Parameters**: None
 
 **Example**:
+
 ```json
 {
   "tool": "broadcast_get_active_listeners",
@@ -1452,6 +1678,7 @@ All tool calls use JSON-RPC 2.0 format:
 ### 3. Asset Path Format
 
 Cocos Creator uses `db://` prefixed asset URL format:
+
 - Scenes: `db://assets/scenes/GameScene.scene`
 - Prefabs: `db://assets/prefabs/Player.prefab`
 - Scripts: `db://assets/scripts/GameManager.ts`
@@ -1496,4 +1723,4 @@ If you encounter issues during use, you can:
 
 ---
 
-*This document is based on Cocos Creator MCP Server v1.3.0. Please refer to the latest version documentation for updates.*
+_This document is based on Cocos Creator MCP Server v1.3.0. Please refer to the latest version documentation for updates._

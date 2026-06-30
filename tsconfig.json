@@ -1,11 +1,11 @@
 {
-    "extends": "./base.tsconfig.json",
-    "compilerOptions": {
-        "outDir": "./dist",
-        "rootDir": "./source",
-        "types": [
-            "node",
-            "@cocos/creator-types/editor",
-        ]
-    }
+  "extends": "./base.tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./source",
+    "types": [
+      "node",
+      "@cocos/creator-types/editor"
+    ],
+    "outDir": "./dist"
+  }
 }
