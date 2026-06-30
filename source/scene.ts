@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { assetManager, director, js, Material, Node, Scene, SpriteFrame } from 'cc'
 
 module.paths.push(join(Editor.App.path, 'node_modules'))
 
@@ -24,7 +25,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   addComponentToNode(nodeUuid: string, componentType: string) {
     try {
-      const { director, js } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -60,7 +60,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   removeComponentFromNode(nodeUuid: string, componentType: string) {
     try {
-      const { director, js } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -94,7 +93,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   createNode(name: string, parentUuid?: string) {
     try {
-      const { director, Node } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -131,7 +129,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   getNodeInfo(nodeUuid: string) {
     try {
-      const { director } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -170,7 +167,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   getAllNodes() {
     try {
-      const { director } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -202,7 +198,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   findNodeByName(name: string) {
     try {
-      const { director } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -233,7 +228,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   getCurrentSceneInfo() {
     try {
-      const { director } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -258,7 +252,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   setNodeProperty(nodeUuid: string, property: string, value: any) {
     try {
-      const { director } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -305,7 +298,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   getSceneHierarchy(includeComponents: boolean = false) {
     try {
-      const { director } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -346,7 +338,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   createPrefabFromNode(nodeUuid: string, prefabPath: string) {
     try {
-      const { director, instantiate } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -378,7 +369,6 @@ export const methods: { [key: string]: (...any: any) => any } = {
    */
   setComponentProperty(nodeUuid: string, componentType: string, property: string, value: any) {
     try {
-      const { director, js } = require('cc')
       const scene = director.getScene()
       if (!scene) {
         return { success: false, error: 'No active scene' }
@@ -400,8 +390,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
         // 支持 value 为 uuid 或资源路径
         if (typeof value === 'string') {
           // 先尝试按 uuid 查找
-          const assetManager = require('cc').assetManager
-          assetManager.resources.load(value, require('cc').SpriteFrame, (err: any, spriteFrame: any) => {
+          assetManager.resources?.load(value, SpriteFrame, (err: any, spriteFrame: any) => {
             if (!err && spriteFrame) {
               component.spriteFrame = spriteFrame
             }
@@ -426,8 +415,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
       else if (property === 'material' && (componentType === 'cc.Sprite' || componentType === 'cc.MeshRenderer')) {
         // 支持 value 为 uuid 或资源路径
         if (typeof value === 'string') {
-          const assetManager = require('cc').assetManager
-          assetManager.resources.load(value, require('cc').Material, (err: any, material: any) => {
+          assetManager.resources.load(value, Material, (err: any, material: any) => {
             if (!err && material) {
               component.material = material
             }

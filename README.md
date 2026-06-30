@@ -33,7 +33,7 @@ cocos store：https://store.cocos.com/app/detail/7941
 
 ## 工具体系与操作码
 
-- 所有工具均以“类别_操作”命名，参数采用统一Schema，支持多操作码（action）切换，极大提升灵活性和可扩展性。
+- 所有工具均以“类别\_操作”命名，参数采用统一Schema，支持多操作码（action）切换，极大提升灵活性和可扩展性。
 - 50个核心工具涵盖场景、节点、组件、预制体、资源、项目、调试、偏好设置、服务器、消息广播等全部编辑器操作。
 - 工具调用示例：
 
@@ -91,7 +91,7 @@ cocos store：https://store.cocos.com/app/detail/7941
 
 #### 📈 功能增强
 
-- **完整组件属性保留**: 包括私有属性（如_group、_density等）在内的所有组件属性
+- **完整组件属性保留**: 包括私有属性（如\_group、\_density等）在内的所有组件属性
 - **子节点结构支持**: 正确处理预制体的层级结构和子节点关系
 - **变换属性处理**: 保留节点的位置、旋转、缩放和层级信息
 - **调试信息优化**: 添加详细的引用处理日志，便于问题追踪
@@ -161,48 +161,39 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp（使用
 
 **Claude客户端配置：**
 
-```
+```json
 {
-
   "mcpServers": {
-
-		"cocos-creator": {
-
- 		"type": "http",
-
-		"url": "http://127.0.0.1:3000/mcp"
-
-		 }
-
-	  }
+    "cocos-creator": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp"
+    }
+  }
 
 }
 ```
 
 **Cursor或VS类MCP配置**
 
-```
+```json
 {
-
   "mcpServers": {
-
-   "cocos-creator": {
+    "cocos-creator": {
       "url": "http://localhost:3000/mcp"
-   }
+    }
   }
-
 }
 ```
 
 ## 功能特性
 
-### 🎯 场景操作 (scene_*)
+### 🎯 场景操作 (scene\_\*)
 
 - **scene_management**: 场景管理 - 获取当前场景、打开/保存/创建/关闭场景，支持场景列表查询
 - **scene_hierarchy**: 场景层级 - 获取完整场景结构，支持组件信息包含
 - **scene_execution_control**: 执行控制 - 执行组件方法、场景脚本、预制体同步
 
-### 🎮 节点操作 (node_*)
+### 🎮 节点操作 (node\_\*)
 
 - **node_query**: 节点查询 - 按名称/模式查找节点，获取节点信息，检测2D/3D类型
 - **node_lifecycle**: 节点生命周期 - 创建/删除节点，支持组件预装、预制体实例化
@@ -211,32 +202,32 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp（使用
 - **node_clipboard**: 节点剪贴板 - 复制/粘贴/剪切节点操作
 - **node_property_management**: 属性管理 - 重置节点属性、组件属性、变换属性
 
-### 🔧 组件操作 (component_*)
+### 🔧 组件操作 (component\_\*)
 
 - **component_manage**: 组件管理 - 添加/删除引擎组件（cc.Sprite、cc.Button等）
 - **component_script**: 脚本组件 - 挂载/移除自定义脚本组件
 - **component_query**: 组件查询 - 获取组件列表、详细信息、可用组件类型
 - **set_component_property**: 属性设置 - 设置单个或多个组件属性值
 
-### 📦 预制体操作 (prefab_*)
+### 📦 预制体操作 (prefab\_\*)
 
 - **prefab_browse**: 预制体浏览 - 列出预制体、查看信息、验证文件
 - **prefab_lifecycle**: 预制体生命周期 - 从节点创建预制体、删除预制体
 - **prefab_instance**: 预制体实例 - 实例化到场景、解除链接、应用更改、还原原始
 - **prefab_edit**: 预制体编辑 - 进入/退出编辑模式、保存预制体、测试更改
 
-### 🚀 项目控制 (project_*)
+### 🚀 项目控制 (project\_\*)
 
 - **project_manage**: 项目管理 - 运行项目、构建项目、获取项目信息和设置
 - **project_build_system**: 构建系统 - 控制构建面板、检查构建状态、预览服务器管理
 
-### 🔍 调试工具 (debug_*)
+### 🔍 调试工具 (debug\_\*)
 
 - **debug_console**: 控制台管理 - 获取/清空控制台日志，支持过滤和限制
 - **debug_logs**: 日志分析 - 读取/搜索/分析项目日志文件，支持模式匹配
 - **debug_system**: 系统调试 - 获取编辑器信息、性能统计、环境信息
 
-### 📁 资源管理 (asset_*)
+### 📁 资源管理 (asset\_\*)
 
 - **asset_manage**: 资源管理 - 批量导入/删除资源、保存元数据、生成URL
 - **asset_analyze**: 资源分析 - 获取依赖关系、导出资源清单
@@ -244,27 +235,27 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp（使用
 - **asset_query**: 资源查询 - 按类型/文件夹查询资源、获取详细信息
 - **asset_operations**: 资源操作 - 创建/复制/移动/删除/保存/重新导入资源
 
-### ⚙️ 偏好设置 (preferences_*)
+### ⚙️ 偏好设置 (preferences\_\*)
 
 - **preferences_manage**: 偏好管理 - 获取/设置编辑器偏好设置
 - **preferences_global**: 全局设置 - 管理全局配置和系统设置
 
-### 🌐 服务器与广播 (server__/ broadcast__)
+### 🌐 服务器与广播 (server*\* / broadcast*\*)
 
 - **server_info**: 服务器信息 - 获取服务器状态、项目详情、环境信息
 - **broadcast_message**: 消息广播 - 监听和广播自定义消息
 
-### 🖼️ 参考图片 (referenceImage_*)
+### 🖼️ 参考图片 (referenceImage\_\*)
 
 - **reference_image_manage**: 参考图片管理 - 添加/删除/管理场景视图中的参考图片
 - **reference_image_view**: 参考图片视图 - 控制参考图片的显示和编辑
 
-### 🎨 场景视图 (sceneView_*)
+### 🎨 场景视图 (sceneView\_\*)
 
 - **scene_view_control**: 场景视图控制 - 控制Gizmo工具、坐标系、视图模式
 - **scene_view_tools**: 场景视图工具 - 管理场景视图的各种工具和选项
 
-### ✅ 验证工具 (validation_*)
+### ✅ 验证工具 (validation\_\*)
 
 - **validation_scene**: 场景验证 - 验证场景完整性、检查缺失资源
 - **validation_asset**: 资源验证 - 验证资源引用、检查资源完整性
@@ -278,7 +269,7 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp（使用
 
 ### 🚀 核心优势
 
-- **操作码统一**: 所有工具采用"类别_操作"命名，参数Schema统一
+- **操作码统一**: 所有工具采用"类别\_操作"命名，参数Schema统一
 - **高复用性**: 50个核心工具覆盖99%编辑器功能
 - **AI友好**: 参数清晰、文档完善、调用简单
 - **性能优化**: 降低50% token消耗，提升AI调用成功率

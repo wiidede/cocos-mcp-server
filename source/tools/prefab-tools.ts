@@ -1,4 +1,7 @@
 import type { PrefabInfo, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import fs from 'node:fs'
+import path from 'node:path'
+import process from 'node:process'
 
 export class PrefabTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -433,8 +436,6 @@ export class PrefabTools implements ToolExecutor {
         assetContent = await Editor.Message.request('asset-db', 'query-asset-info', prefabPath)
         if (assetContent && assetContent.source) {
           // 如果有source路径，直接读取文件
-          const fs = require('node:fs')
-          const path = require('node:path')
           const fullPath = path.resolve(assetContent.source)
           const fileContent = fs.readFileSync(fullPath, 'utf8')
           return JSON.parse(fileContent)
@@ -446,8 +447,6 @@ export class PrefabTools implements ToolExecutor {
 
       // 备用方法：转换db://路径为实际文件路径
       const fsPath = prefabPath.replace('db://assets/', 'assets/').replace('db://assets', 'assets')
-      const fs = require('node:fs')
-      const path = require('node:path')
 
       // 尝试多个可能的项目根路径
       const possiblePaths = [
@@ -994,11 +993,8 @@ export class PrefabTools implements ToolExecutor {
     }
 
     try {
-      const settings = await Editor.Message.request('cocos-mcp-server', 'get-server-settings').catch(() => ({ port: 3000 }))
-      const mcpPort = settings?.port || 3000
-
       // 使用MCP接口获取节点的组件信息
-      const response = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, {
+      const response = await fetch('http://localhost:8585/mcp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1069,13 +1065,13 @@ export class PrefabTools implements ToolExecutor {
       return false
 
     // 检查基本属性 - 适配query-node-tree的数据格式
-    return Object.hasOwn(nodeData, 'uuid')
-      || Object.hasOwn(nodeData, 'name')
-      || Object.hasOwn(nodeData, '__type__')
+    return Object.prototype.hasOwnProperty.call(nodeData, 'uuid')
+      || Object.prototype.hasOwnProperty.call(nodeData, 'name')
+      || Object.prototype.hasOwnProperty.call(nodeData, '__type__')
       || (nodeData.value && (
-        Object.hasOwn(nodeData.value, 'uuid')
-        || Object.hasOwn(nodeData.value, 'name')
-        || Object.hasOwn(nodeData.value, '__type__')
+        Object.prototype.hasOwnProperty.call(nodeData.value, 'uuid')
+        || Object.prototype.hasOwnProperty.call(nodeData.value, 'name')
+        || Object.prototype.hasOwnProperty.call(nodeData.value, '__type__')
       ))
   }
 
@@ -1139,7 +1135,7 @@ export class PrefabTools implements ToolExecutor {
     return children
   }
 
-  private generateUUID(): string {
+  protected generateUUID(): string {
     // 生成符合Cocos Creator格式的UUID
     const chars = '0123456789abcdef'
     let uuid = ''
@@ -2743,7 +2739,7 @@ export class PrefabTools implements ToolExecutor {
     const safeProperties = ['enabled', 'color', 'string', 'fontSize', 'spriteFrame', 'type', 'sizeMode']
 
     for (const prop of safeProperties) {
-      if (Object.hasOwn(componentData, prop)) {
+      if (Object.prototype.hasOwnProperty.call(componentData, prop)) {
         const value = this.getComponentPropertyValue(componentData, prop)
         if (value !== undefined) {
           component[`_${prop}`] = value
@@ -2834,7 +2830,7 @@ export class PrefabTools implements ToolExecutor {
     }
 
     // 如果有value属性，优先使用value
-    if (typeof data === 'object' && Object.hasOwn(data, 'value')) {
+    if (typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, 'value')) {
       return data.value
     }
 

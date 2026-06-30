@@ -1,6 +1,7 @@
-const { spawnSync } = require('node:child_process')
-const fs = require('node:fs')
-const path = require('node:path')
+import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+import process from 'node:process'
 
 const PATH = {
   packageJSON: path.join(__dirname, '../package.json'),
@@ -45,7 +46,8 @@ function checkCreatorTypesVersion(version) {
         return versions.includes(version)
       }
     }
-    catch (parseError) {
+    catch (e) {
+      console.error(e)
       // 如果JSON解析失败，尝试作为字符串处理
       return output.includes(version)
     }

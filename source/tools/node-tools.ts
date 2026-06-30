@@ -315,7 +315,7 @@ export class NodeTools implements ToolExecutor {
         if (!targetParentUuid) {
           try {
             const sceneInfo = await Editor.Message.request('scene', 'query-node-tree')
-            if (sceneInfo && typeof sceneInfo === 'object' && !Array.isArray(sceneInfo) && Object.hasOwn(sceneInfo, 'uuid')) {
+            if (sceneInfo && typeof sceneInfo === 'object' && !Array.isArray(sceneInfo) && Object.prototype.hasOwnProperty.call(sceneInfo, 'uuid')) {
               targetParentUuid = (sceneInfo as any).uuid
               console.log(`No parent specified, using scene root: ${targetParentUuid}`)
             }

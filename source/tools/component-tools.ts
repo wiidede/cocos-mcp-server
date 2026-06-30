@@ -131,30 +131,30 @@ export class ComponentTools implements ToolExecutor {
                 + '  - Alternative: "#FF0000" (hexadecimal format)\n'
                 + '  - Transparency: a value controls opacity, 255 = fully opaque, 0 = fully transparent\n\n'
                 + '📐 Vector and Size Types:\n'
-                                + '• vec2: {"x":100,"y":50} (2D vector)\n'
-                                + '• vec3: {"x":1,"y":2,"z":3} (3D vector)\n'
-                                + '• size: {"width":100,"height":50} (size dimensions)\n\n'
-                                + '🔗 Reference Types (using UUID strings):\n'
-                                + '• node: "target-node-uuid" (node reference)\n'
-                                + '  How to get: Use get_all_nodes or find_node_by_name to get node UUIDs\n'
-                                + '• component: "target-node-uuid" (component reference)\n'
-                                + '  How it works: \n'
-                                + '    1. Provide the UUID of the NODE that contains the target component\n'
-                                + '    2. System auto-detects required component type from property metadata\n'
-                                + '    3. Finds the component on target node and gets its scene __id__\n'
-                                + '    4. Sets reference using the scene __id__ (not node UUID)\n'
-                                + '  Example: value="label-node-uuid" will find cc.Label and use its scene ID\n'
-                                + '• spriteFrame: "spriteframe-uuid" (sprite frame asset)\n'
-                                + '  How to get: Check asset database or use asset browser\n'
-                                + '• prefab: "prefab-uuid" (prefab asset)\n'
-                                + '  How to get: Check asset database or use asset browser\n'
-                                + '• asset: "asset-uuid" (generic asset reference)\n'
-                                + '  How to get: Check asset database or use asset browser\n\n'
-                                + '📋 Array Types:\n'
-                                + '• nodeArray: ["uuid1","uuid2"] (array of node UUIDs)\n'
-                                + '• colorArray: [{"r":255,"g":0,"b":0,"a":255}] (array of colors)\n'
-                                + '• numberArray: [1,2,3,4,5] (array of numbers)\n'
-                                + '• stringArray: ["item1","item2"] (array of strings)',
+                + '• vec2: {"x":100,"y":50} (2D vector)\n'
+                + '• vec3: {"x":1,"y":2,"z":3} (3D vector)\n'
+                + '• size: {"width":100,"height":50} (size dimensions)\n\n'
+                + '🔗 Reference Types (using UUID strings):\n'
+                + '• node: "target-node-uuid" (node reference)\n'
+                + '  How to get: Use get_all_nodes or find_node_by_name to get node UUIDs\n'
+                + '• component: "target-node-uuid" (component reference)\n'
+                + '  How it works: \n'
+                + '    1. Provide the UUID of the NODE that contains the target component\n'
+                + '    2. System auto-detects required component type from property metadata\n'
+                + '    3. Finds the component on target node and gets its scene __id__\n'
+                + '    4. Sets reference using the scene __id__ (not node UUID)\n'
+                + '  Example: value="label-node-uuid" will find cc.Label and use its scene ID\n'
+                + '• spriteFrame: "spriteframe-uuid" (sprite frame asset)\n'
+                + '  How to get: Check asset database or use asset browser\n'
+                + '• prefab: "prefab-uuid" (prefab asset)\n'
+                + '  How to get: Check asset database or use asset browser\n'
+                + '• asset: "asset-uuid" (generic asset reference)\n'
+                + '  How to get: Check asset database or use asset browser\n\n'
+                + '📋 Array Types:\n'
+                + '• nodeArray: ["uuid1","uuid2"] (array of node UUIDs)\n'
+                + '• colorArray: [{"r":255,"g":0,"b":0,"a":255}] (array of colors)\n'
+                + '• numberArray: [1,2,3,4,5] (array of numbers)\n'
+                + '• stringArray: ["item1","item2"] (array of strings)',
             },
           },
           required: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'],
@@ -219,10 +219,22 @@ export class ComponentTools implements ToolExecutor {
 
   private async addComponent(nodeUuid: string, componentType: string): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
+      // 判断是否为脚本组件（不以 cc. 开头的认为是脚本组件）
+      const isScriptComponent = !componentType.startsWith('cc.')
+
       // 先查找节点上是否已存在该组件
       const allComponentsInfo = await this.getComponents(nodeUuid)
+
       if (allComponentsInfo.success && allComponentsInfo.data?.components) {
-        const existingComponent = allComponentsInfo.data.components.find((comp: any) => comp.type === componentType)
+        const existingComponent = allComponentsInfo.data.components.find((comp: any) => {
+          const compType = comp.type || ''
+          // 对于内置组件，直接比较 type
+          if (!isScriptComponent) {
+            return compType === componentType
+          }
+          // 对于脚本组件，type 字段就是脚本名称
+          return compType === componentType
+        })
         if (existingComponent) {
           resolve({
             success: true,
@@ -232,23 +244,37 @@ export class ComponentTools implements ToolExecutor {
               componentType,
               componentVerified: true,
               existing: true,
+              actualType: existingComponent.type,
+              actualName: existingComponent.name,
             },
           })
           return
         }
       }
+
       // 尝试直接使用 Editor API 添加组件
       Editor.Message.request('scene', 'create-component', {
         uuid: nodeUuid,
         component: componentType,
       }).then(async (result: any) => {
         // 等待一段时间让Editor完成组件添加
-        await new Promise(resolve => setTimeout(resolve, 100))
+        await new Promise(resolve => setTimeout(resolve, 200))
         // 重新查询节点信息验证组件是否真的添加成功
         try {
           const allComponentsInfo2 = await this.getComponents(nodeUuid)
+
           if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
-            const addedComponent = allComponentsInfo2.data.components.find((comp: any) => comp.type === componentType)
+            // 改进验证逻辑：对于脚本组件，type 字段就是脚本名称
+            const addedComponent = allComponentsInfo2.data.components.find((comp: any) => {
+              const compType = comp.type || ''
+              // 对于内置组件（以 cc. 开头）
+              if (componentType.startsWith('cc.')) {
+                return compType === componentType
+                  || compType.replace('cc.', '') === componentType.replace('cc.', '')
+              }
+              // 对于脚本组件，type 字段就是脚本名称
+              return compType === componentType
+            })
             if (addedComponent) {
               resolve({
                 success: true,
@@ -258,13 +284,19 @@ export class ComponentTools implements ToolExecutor {
                   componentType,
                   componentVerified: true,
                   existing: false,
+                  actualType: addedComponent.type,
+                  actualName: addedComponent.name,
                 },
               })
             }
             else {
+              // 如果找不到，列出所有组件的 name 和 type 便于调试
+              const componentList = allComponentsInfo2.data.components.map((c: any) =>
+                `type:${c.type}, name:${c.name}`,
+              ).join('; ')
               resolve({
                 success: false,
-                error: `Component '${componentType}' was not found on node after addition. Available components: ${allComponentsInfo2.data.components.map((c: any) => c.type).join(', ')}`,
+                error: `Component '${componentType}' was not found on node after addition. Available components: ${componentList}`,
               })
             }
           }
@@ -342,12 +374,25 @@ export class ComponentTools implements ToolExecutor {
       // 优先尝试直接使用 Editor API 查询节点信息
       Editor.Message.request('scene', 'query-node', nodeUuid).then((nodeData: any) => {
         if (nodeData && nodeData.__comps__) {
-          const components = nodeData.__comps__.map((comp: any) => ({
-            type: comp.__type__ || comp.cid || comp.type || 'Unknown',
-            uuid: comp.uuid?.value || comp.uuid || null,
-            enabled: comp.enabled !== undefined ? comp.enabled : true,
-            properties: this.extractComponentProperties(comp),
-          }))
+          const components = nodeData.__comps__.map((comp: any) => {
+            // 提取组件名称：
+            // - 对于脚本组件，comp.type 就是脚本名称（如 'GameManager'）
+            // - 对于内置组件，comp.cid 是类型（如 'cc.UITransform'）
+            // - 也可以从 comp.value?.name 读取
+            const extractedName = comp.value?.name
+              || comp.type
+              || comp.cid
+              || ''
+
+            return {
+              // type: 对于脚本组件是脚本名，对于内置组件是 cid
+              type: comp.type || comp.cid || comp.__type__ || 'Unknown',
+              name: extractedName,
+              uuid: comp.uuid?.value || comp.uuid || null,
+              enabled: comp.enabled !== undefined ? comp.enabled : true,
+              properties: this.extractComponentProperties(comp),
+            }
+          })
 
           resolve({
             success: true,
@@ -1158,7 +1203,18 @@ export class ComponentTools implements ToolExecutor {
       // 先查找节点上是否已存在该脚本组件
       const allComponentsInfo = await this.getComponents(nodeUuid)
       if (allComponentsInfo.success && allComponentsInfo.data?.components) {
-        const existingScript = allComponentsInfo.data.components.find((comp: any) => comp.type === scriptName)
+        // 改进查找逻辑：同时检查 type、name 和 cid 字段
+        const existingScript = allComponentsInfo.data.components.find((comp: any) => {
+          const compType = comp.type || ''
+          const compName = comp.name || ''
+          const compCid = comp.cid || ''
+          return compType === scriptName
+            || compName === scriptName
+            || compCid === scriptName
+            // 对于脚本组件，name 可能是 "ScriptName<ScriptName>" 格式
+            || compName.includes(`<${scriptName}>`)
+            || compName.startsWith(`${scriptName}<`)
+        })
         if (existingScript) {
           resolve({
             success: true,
@@ -1167,6 +1223,7 @@ export class ComponentTools implements ToolExecutor {
               nodeUuid,
               componentName: scriptName,
               existing: true,
+              actualType: existingScript.type,
             },
           })
           return
@@ -1182,7 +1239,18 @@ export class ComponentTools implements ToolExecutor {
         // 重新查询节点信息验证脚本是否真的添加成功
         const allComponentsInfo2 = await this.getComponents(nodeUuid)
         if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
-          const addedScript = allComponentsInfo2.data.components.find((comp: any) => comp.type === scriptName)
+          // 改进验证逻辑：同时检查 type、name 和 cid 字段
+          const addedScript = allComponentsInfo2.data.components.find((comp: any) => {
+            const compType = comp.type || ''
+            const compName = comp.name || ''
+            const compCid = comp.cid || ''
+            return compType === scriptName
+              || compName === scriptName
+              || compCid === scriptName
+              // 对于脚本组件，name 可能是 "ScriptName<ScriptName>" 格式
+              || compName.includes(`<${scriptName}>`)
+              || compName.startsWith(`${scriptName}<`)
+          })
           if (addedScript) {
             resolve({
               success: true,
@@ -1191,6 +1259,7 @@ export class ComponentTools implements ToolExecutor {
                 nodeUuid,
                 componentName: scriptName,
                 existing: false,
+                actualType: addedScript.type,
               },
             })
           }
@@ -1314,7 +1383,7 @@ export class ComponentTools implements ToolExecutor {
 
     // 尝试多种方式查找属性：
     // 1. 直接属性访问
-    if (Object.hasOwn(component, propertyName)) {
+    if (Object.prototype.hasOwnProperty.call(component, propertyName)) {
       propertyValue = component[propertyName]
       propertyExists = true
     }

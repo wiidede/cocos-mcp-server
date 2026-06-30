@@ -1,5 +1,3 @@
-declare const Editor: any
-
 interface TestResult {
   tool: string
   method: string

@@ -1,11 +1,13 @@
 {
   "extends": "./base.tsconfig.json",
   "compilerOptions": {
-    "rootDir": "./source",
+    "rootDir": ".",
     "types": [
       "node",
-      "@cocos/creator-types/editor"
+      "@cocos/creator-types/editor",
+      "@cocos/creator-types/engine"
     ],
     "outDir": "./dist"
-  }
+  },
+  "include": ["source/**/*"]
 }

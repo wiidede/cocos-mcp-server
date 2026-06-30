@@ -1,5 +1,3 @@
-declare const Editor: any
-
 /**
  * MCP 工具测试器 - 直接测试通过 WebSocket 的 MCP 工具
  */
@@ -159,6 +157,7 @@ export class MCPToolTester {
           }
         }
         catch (e) {
+          console.error('解析创建节点结果时出错:', e)
         }
       }
 
@@ -194,6 +193,7 @@ export class MCPToolTester {
             }
           }
           catch (e) {
+            console.error('通过名称查找节点时解析JSON失败:', e)
           }
         }
 
@@ -239,4 +239,4 @@ export class MCPToolTester {
 }
 
 // 导出到全局方便测试
-(global as any).MCPToolTester = MCPToolTester
+(globalThis as any).MCPToolTester = MCPToolTester

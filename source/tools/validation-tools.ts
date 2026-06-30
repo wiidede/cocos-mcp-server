@@ -225,7 +225,7 @@ export class ValidationTools implements ToolExecutor {
     // Required fields checking
     if (schema.required && Array.isArray(schema.required)) {
       for (const field of schema.required) {
-        if (!Object.hasOwn(data, field)) {
+        if (!Object.prototype.hasOwnProperty.call(data, field)) {
           errors.push(`Missing required field: ${field}`)
           suggestions.push(`Add required field "${field}"`)
         }
@@ -251,7 +251,7 @@ export class ValidationTools implements ToolExecutor {
     if (jsonStr.includes('\n') || jsonStr.includes('\t')) {
       suggestions.push('Escape newlines and tabs properly')
     }
-    if (/,\s*[}\]]/.test(jsonStr)) {
+    if (jsonStr.match(/,\s*[}\]]/)) {
       suggestions.push('Remove trailing commas')
     }
 
@@ -260,7 +260,7 @@ export class ValidationTools implements ToolExecutor {
 
   private generateCurlCommand(jsonStr: string): string {
     const escapedJson = jsonStr.replace(/'/g, '\'"\'"\'')
-    return `curl -X POST http://127.0.0.1:3000/mcp \\
+    return `curl -X POST http://127.0.0.1:8585/mcp \\
   -H "Content-Type: application/json" \\
   -d '${escapedJson}'`
   }

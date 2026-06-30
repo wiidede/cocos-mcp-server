@@ -124,7 +124,7 @@ export async function runAllTests() {
 }
 
 // 导出到全局，方便在控制台调用
-(global as any).MCPTest = {
+(globalThis as any).MCPTest = {
   testSceneTools,
   testAssetTools,
   testProjectTools,

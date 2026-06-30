@@ -1060,7 +1060,7 @@ export class ProjectTools implements ToolExecutor {
 
         if (includeSubAssets && assetInfo) {
           // For image assets, try to get spriteFrame and texture sub-assets
-          if (assetInfo.type === 'cc.ImageAsset' || /\.(png|jpg|jpeg|gif|tga|bmp|psd)$/i.test(assetPath)) {
+          if (assetInfo.type === 'cc.ImageAsset' || assetPath.match(/\.(png|jpg|jpeg|gif|tga|bmp|psd)$/i)) {
             // Generate common sub-asset UUIDs
             const baseUuid = assetInfo.uuid
             const possibleSubAssets = [

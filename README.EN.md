@@ -161,48 +161,40 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 
 **Claude client configuration:**
 
-```
+```json
 {
-
   "mcpServers": {
-
-		"cocos-creator": {
-
- 		"type": "http",
-
-		"url": "http://127.0.0.1:3000/mcp"
-
-		 }
-
-	  }
-
+    "cocos-creator": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp"
+    }
+  }
 }
 ```
 
 **Cursor or VS class MCP configuration**
 
-```
+```json
 {
 
   "mcpServers": {
 
-   "cocos-creator": {
+    "cocos-creator": {
       "url": "http://localhost:3000/mcp"
-   }
+    }
   }
-
 }
 ```
 
 ## Features
 
-### 🎯 Scene Operations (scene_*)
+### 🎯 Scene Operations (scene\_\*)
 
 - **scene_management**: Scene management - Get current scene, open/save/create/close scenes, support scene list query
 - **scene_hierarchy**: Scene hierarchy - Get complete scene structure, support component information inclusion
 - **scene_execution_control**: Execution control - Execute component methods, scene scripts, prefab synchronization
 
-### 🎮 Node Operations (node_*)
+### 🎮 Node Operations (node\_\*)
 
 - **node_query**: Node query - Find nodes by name/pattern, get node information, detect 2D/3D types
 - **node_lifecycle**: Node lifecycle - Create/delete nodes, support component pre-installation, prefab instantiation
@@ -211,32 +203,32 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 - **node_clipboard**: Node clipboard - Copy/paste/cut node operations
 - **node_property_management**: Property management - Reset node properties, component properties, transform properties
 
-### 🔧 Component Operations (component_*)
+### 🔧 Component Operations (component\_\*)
 
 - **component_manage**: Component management - Add/remove engine components (cc.Sprite, cc.Button, etc.)
 - **component_script**: Script components - Mount/remove custom script components
 - **component_query**: Component query - Get component list, detailed information, available component types
 - **set_component_property**: Property setting - Set single or multiple component property values
 
-### 📦 Prefab Operations (prefab_*)
+### 📦 Prefab Operations (prefab\_\*)
 
 - **prefab_browse**: Prefab browsing - List prefabs, view information, validate files
 - **prefab_lifecycle**: Prefab lifecycle - Create prefabs from nodes, delete prefabs
 - **prefab_instance**: Prefab instances - Instantiate to scene, unlink, apply changes, restore original
 - **prefab_edit**: Prefab editing - Enter/exit edit mode, save prefabs, test changes
 
-### 🚀 Project Control (project_*)
+### 🚀 Project Control (project\_\*)
 
 - **project_manage**: Project management - Run project, build project, get project information and settings
 - **project_build_system**: Build system - Control build panel, check build status, preview server management
 
-### 🔍 Debug Tools (debug_*)
+### 🔍 Debug Tools (debug\_\*)
 
 - **debug_console**: Console management - Get/clear console logs, support filtering and limiting
 - **debug_logs**: Log analysis - Read/search/analyze project log files, support pattern matching
 - **debug_system**: System debugging - Get editor information, performance statistics, environment information
 
-### 📁 Asset Management (asset_*)
+### 📁 Asset Management (asset\_\*)
 
 - **asset_manage**: Asset management - Batch import/delete assets, save metadata, generate URLs
 - **asset_analyze**: Asset analysis - Get dependency relationships, export asset manifests
@@ -244,27 +236,27 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp (use you
 - **asset_query**: Asset query - Query assets by type/folder, get detailed information
 - **asset_operations**: Asset operations - Create/copy/move/delete/save/re-import assets
 
-### ⚙️ Preferences (preferences_*)
+### ⚙️ Preferences (preferences\_\*)
 
 - **preferences_manage**: Preferences management - Get/set editor preferences
 - **preferences_global**: Global settings - Manage global configuration and system settings
 
-### 🌐 Server and Broadcasting (server__/ broadcast__)
+### 🌐 Server and Broadcasting (server*\* / broadcast*\*)
 
 - **server_info**: Server information - Get server status, project details, environment information
 - **broadcast_message**: Message broadcasting - Listen and broadcast custom messages
 
-### 🖼️ Reference Images (referenceImage_*)
+### 🖼️ Reference Images (referenceImage\_\*)
 
 - **reference_image_manage**: Reference image management - Add/delete/manage reference images in scene view
 - **reference_image_view**: Reference image view - Control reference image display and editing
 
-### 🎨 Scene View (sceneView_*)
+### 🎨 Scene View (sceneView\_\*)
 
 - **scene_view_control**: Scene view control - Control Gizmo tools, coordinate systems, view modes
 - **scene_view_tools**: Scene view tools - Manage various scene view tools and options
 
-### ✅ Validation Tools (validation_*)
+### ✅ Validation Tools (validation\_\*)
 
 - **validation_scene**: Scene validation - Validate scene integrity, check missing assets
 - **validation_asset**: Asset validation - Validate asset references, check asset integrity

@@ -1,6 +1,7 @@
 import type { ConsoleMessage, PerformanceStats, ToolDefinition, ToolExecutor, ToolResponse, ValidationIssue, ValidationResult } from '../types'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import process from 'node:process'
 
 export class DebugTools implements ToolExecutor {
   private consoleMessages: ConsoleMessage[] = []
