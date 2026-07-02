@@ -1,15 +1,15 @@
 /**
- * Bug 回归测试
+ * 回归测试 - 第一批
  *
- * 对应之前 fix 的 10 个 bug。每个 case 都在真实 Cocos 场景中跑。
+ * 这批测试覆盖第一批发现并修复的 10 个 bug
  */
 
-import type { TestCase } from '../test-infra/runner'
-import { sleep } from '../test-infra/setup'
+import type { TestCase } from '../../test-infra/metadata'
+import { sleep } from '../../test-infra/setup'
 
 const SCENE_PATH_FOR_TEST = 'db://assets/__dev_test__/SubTestScene.scene'
 
-export const bugFixTests: TestCase[] = [
+export const batch1Tests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   // Bug #1 (初版): scene_management.create 同时传 sceneName + path 会报
   //   "Cannot read properties of undefined (reading 'endsWith')"，且 message 字段变成
@@ -17,8 +17,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_01:scene_create_sceneName_and_path',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'scene_management.create 同时传 sceneName + savePath 不应报错，且 message 中 sceneName 正确',
+    tags: ['regression', 'scene', 'core'],
+    regression: {
+      bugId: 'v1.5.0-bug-01',
+      fixedIn: 'v1.5.0',
+      rootCause: 'sceneName 和 savePath 同时传入时，代码逻辑错误导致 sceneName 变为 undefined。修复：优先使用 sceneName，否则从 path 推断。',
+    },
     run: async (ctx) => {
       // 用临时子场景避免与默认 TestScene 冲突
       const resp = await ctx.callTool('scene_management', {
@@ -43,8 +49,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_02:component_property_color_case_insensitive',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'component_property.set propertyType="Color"（首字母大写）不报错',
+    tags: ['regression', 'component', 'critical'],
+    regression: {
+      bugId: 'v1.5.0-bug-02',
+      fixedIn: 'v1.5.0',
+      rootCause: 'propertyType 大小写敏感，导致 "Color" 无法识别。修复：将 propertyType 归一化为小写后处理。',
+    },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
         action: 'create',
@@ -80,8 +92,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_03:scene_query_get_info',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'scene_query.get_info 应返回场景信息',
+    tags: ['regression', 'scene', 'query'],
+    regression: {
+      bugId: 'v1.5.0-bug-03',
+      fixedIn: 'v1.5.0',
+      rootCause: 'scene_query 工具未实现 get_info action。修复：添加 get_info 实现。',
+    },
     run: async (ctx) => {
       const resp: any = await ctx.callTool('scene_query', { action: 'get_info' })
       ctx.step('returns', resp != null)
@@ -96,8 +114,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_04:node_query_components_full',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'node_query.get_info 返回的 components 包含完整 type 与 uuid',
+    tags: ['regression', 'node', 'query', 'component'],
+    regression: {
+      bugId: 'v1.5.0-bug-04',
+      fixedIn: 'v1.5.0',
+      rootCause: 'node_query.get_info 返回的组件信息缺少 type 和 uuid 字段。修复：正确解析 __type__/type/uuid 字段。',
+    },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
         action: 'create',
@@ -136,8 +160,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_05:component_query_size_default',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'component_query.get_components 默认 payload 不含 properties',
+    tags: ['regression', 'component', 'query', 'performance'],
+    regression: {
+      bugId: 'v1.5.0-bug-05',
+      fixedIn: 'v1.5.0',
+      rootCause: 'component_query.get_components 默认返回完整 properties，导致 payload 过大（~18.9KB）。修复：默认只返回 type/name/uuid/enabled。',
+    },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
         action: 'create',
@@ -179,8 +209,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_06:scene_create_auto_canvas',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'scene_management.create autoCreateCanvas=true 自动创建 Canvas 节点',
+    tags: ['regression', 'scene', 'node', 'core'],
+    regression: {
+      bugId: 'v1.5.0-bug-06',
+      fixedIn: 'v1.5.0',
+      rootCause: 'scene_management.create 的 autoCreateCanvas 参数未实现。修复：添加自动创建 Canvas 节点的逻辑。',
+    },
     run: async (ctx) => {
       const resp: any = await ctx.callTool('scene_management', {
         action: 'create',
@@ -213,8 +249,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_07:attachScript_no_false_positive',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: '节点名 = 脚本类名时 attach 脚本不再假阳性 "already exists"',
+    tags: ['regression', 'component', 'script'],
+    regression: {
+      bugId: 'v1.5.0-bug-07',
+      fixedIn: 'v1.5.0',
+      rootCause: '当节点名等于脚本类名时（如节点 "Emitter"），组件 name 字段包含节点名导致 .includes() 误判脚本已存在。修复：改用严格匹配组件类型。',
+    },
     run: async (ctx) => {
       // 先添加 cc.UITransform（默认 2DNode 自带，不重复加）
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
@@ -273,8 +315,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_08:addComponent_script_uuid',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'component_manage.add 接受脚本资产 UUID 形式',
+    tags: ['regression', 'component', 'script', 'asset'],
+    regression: {
+      bugId: 'v1.5.0-bug-08',
+      fixedIn: 'v1.5.0',
+      rootCause: 'component_manage.add 传入脚本资产 UUID 时无法正确识别和添加。修复：先将 UUID 解析为脚本类名再调用 create-component。',
+    },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
         action: 'create',
@@ -335,8 +383,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_09:node_transform_set_complex_value',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'node_transform.set_property 对 Size/Color/Vec2 真的写入并可回读',
+    tags: ['regression', 'node', 'component', 'property'],
+    regression: {
+      bugId: 'v1.5.0-bug-09',
+      fixedIn: 'v1.5.0',
+      rootCause: 'node_transform.set_property 对复杂类型（Size/Color/Vec2）静默失败。修复：自动推导 dump.type 并正确设置属性值。',
+    },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
         action: 'create',
@@ -438,8 +492,14 @@ export const bugFixTests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_10:component_property_on_native',
-    group: 'bug_fix',
+    group: 'regression/batch-1',
     description: 'component_property.set 对 cc.Sprite 原生属性可读写',
+    tags: ['regression', 'component', 'property', 'critical'],
+    regression: {
+      bugId: 'v1.5.0-bug-10',
+      fixedIn: 'v1.5.0',
+      rootCause: 'component_property.set 在原生组件（cc.UITransform/cc.Sprite）上报 "Property not found"。修复：通过 query-node 获取 component.value，正确枚举所有可用属性。',
+    },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
         action: 'create',

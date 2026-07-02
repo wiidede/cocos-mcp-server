@@ -18,6 +18,8 @@ module.exports = Editor.Panel.define({
   style: readFileSync(join(__dirname, '../../../static/style/default/index.css'), 'utf-8'),
   $: {
     runAllBtn: '#runAllBtn',
+    runCoreBtn: '#runCoreBtn',
+    runRegressionBtn: '#runRegressionBtn',
     refreshBtn: '#refreshBtn',
     clearBtn: '#clearBtn',
     copyErrorsBtn: '#copyErrorsBtn',
@@ -26,11 +28,13 @@ module.exports = Editor.Panel.define({
     runningCount: '#runningCount',
     totalCount: '#totalCount',
     testList: '#testList',
+    tagFilters: '#tagFilters',
   },
   methods: {
     tests: [] as TestMeta[],
     results: new Map<string, TestResult>(),
     running: false,
+    activeTags: new Set<string>(),
 
     async loadTests(this: any) {
       try {
@@ -40,21 +44,73 @@ module.exports = Editor.Panel.define({
         this.$.testList.innerHTML = `<div class="empty">加载测试列表失败: ${e?.message ?? e}</div>`
         return
       }
+      this.renderTagFilters()
       this.render()
     },
 
+    renderTagFilters(this: any) {
+      const tags = testRunner.getAvailableTags()
+      const tagCounts: Record<string, number> = {}
+
+      // 统计每个标签的测试数量
+      for (const t of this.tests) {
+        const tags = testRunner.getTagsForTest(t.name)
+        tags.forEach((tag: string) => {
+          tagCounts[tag] = (tagCounts[tag] || 0) + 1
+        })
+      }
+
+      let html = ''
+      for (const tag of tags) {
+        const count = tagCounts[tag] || 0
+        const active = this.activeTags.has(tag) ? 'active' : ''
+        html += `<button class="tag-btn ${active}" data-tag="${this.escape(tag)}">${this.escape(tag)} <span class="tag-btn count">${count}</span></button>`
+      }
+
+      this.$.tagFilters.innerHTML = html
+
+      // 绑定标签按钮点击事件
+      this.$.tagFilters.querySelectorAll('.tag-btn').forEach((btn: any) => {
+        btn.addEventListener('click', () => {
+          const tag = btn.dataset.tag
+          if (this.activeTags.has(tag)) {
+            this.activeTags.delete(tag)
+          }
+          else {
+            this.activeTags.add(tag)
+          }
+          this.renderTagFilters()
+          this.render()
+        })
+      })
+    },
+
+    getFilteredTests(this: any): TestMeta[] {
+      if (this.activeTags.size === 0) {
+        return this.tests
+      }
+
+      return this.tests.filter((t: TestMeta) => {
+        const tags = testRunner.getTagsForTest(t.name)
+        if (!tags.length)
+          return false
+        return Array.from(this.activeTags).some((tag: any) => tags.includes(tag))
+      })
+    },
+
     render(this: any) {
-      this.$.totalCount.textContent = String(this.tests.length)
+      const filteredTests = this.getFilteredTests()
+      this.$.totalCount.textContent = String(filteredTests.length)
       this.updateSummary()
 
-      if (this.tests.length === 0) {
-        this.$.testList.innerHTML = '<div class="empty">没有注册的测试用例</div>'
+      if (filteredTests.length === 0) {
+        this.$.testList.innerHTML = '<div class="empty">没有符合过滤条件的测试用例</div>'
         return
       }
 
       // 按 group 分组
       const grouped: Record<string, TestMeta[]> = {}
-      for (const t of this.tests) {
+      for (const t of filteredTests) {
         if (!grouped[t.group])
           grouped[t.group] = []
         grouped[t.group].push(t)
@@ -277,6 +333,8 @@ module.exports = Editor.Panel.define({
       }
       this.running = true
       this.$.runAllBtn.disabled = true
+      this.$.runCoreBtn.disabled = true
+      this.$.runRegressionBtn.disabled = true
       try {
         await testRunner.runAll((result) => {
           this.results.set(result.name, result)
@@ -288,6 +346,58 @@ module.exports = Editor.Panel.define({
       }
       this.running = false
       this.$.runAllBtn.disabled = false
+      this.$.runCoreBtn.disabled = false
+      this.$.runRegressionBtn.disabled = false
+      this.render()
+    },
+
+    async runCoreTests(this: any) {
+      if (this.running) {
+        Editor.Dialog.warn('已有测试正在运行')
+        return
+      }
+      this.running = true
+      this.$.runAllBtn.disabled = true
+      this.$.runCoreBtn.disabled = true
+      this.$.runRegressionBtn.disabled = true
+      try {
+        await testRunner.runCoreTests((result) => {
+          this.results.set(result.name, result)
+          this.render()
+        })
+      }
+      catch (e: any) {
+        Editor.Dialog.error('运行核心测试失败', { detail: e?.message ?? String(e) })
+      }
+      this.running = false
+      this.$.runAllBtn.disabled = false
+      this.$.runCoreBtn.disabled = false
+      this.$.runRegressionBtn.disabled = false
+      this.render()
+    },
+
+    async runRegressionTests(this: any) {
+      if (this.running) {
+        Editor.Dialog.warn('已有测试正在运行')
+        return
+      }
+      this.running = true
+      this.$.runAllBtn.disabled = true
+      this.$.runCoreBtn.disabled = true
+      this.$.runRegressionBtn.disabled = true
+      try {
+        await testRunner.runRegressionTests((result) => {
+          this.results.set(result.name, result)
+          this.render()
+        })
+      }
+      catch (e: any) {
+        Editor.Dialog.error('运行回归测试失败', { detail: e?.message ?? String(e) })
+      }
+      this.running = false
+      this.$.runAllBtn.disabled = false
+      this.$.runCoreBtn.disabled = false
+      this.$.runRegressionBtn.disabled = false
       this.render()
     },
 
@@ -298,6 +408,8 @@ module.exports = Editor.Panel.define({
 
     bindEvents(this: any) {
       this.$.runAllBtn.addEventListener('click', () => this.runAll())
+      this.$.runCoreBtn.addEventListener('click', () => this.runCoreTests())
+      this.$.runRegressionBtn.addEventListener('click', () => this.runRegressionTests())
       this.$.refreshBtn.addEventListener('click', () => this.loadTests())
       this.$.clearBtn.addEventListener('click', () => this.clearResults())
       this.$.copyErrorsBtn.addEventListener('click', () => this.copyErrors())

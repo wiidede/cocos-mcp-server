@@ -12,6 +12,7 @@ A comprehensive MCP (Model Context Protocol) server plugin for Cocos Creator 3.8
 
 ## Quick Links
 
+- **[🎯 Common Workflows (English)](FEATURE_GUIDE_V1_5_WORKFLOWS.md)** - ⭐ **Start here!** Step-by-step guides for typical game development tasks
 - **[📖 1.5 Tool Guide (English)](FEATURE_GUIDE_V1_5_EN.md)** - AI-oriented guide for the 50 unified tools
 - **[📖 1.5 工具说明 (中文)](FEATURE_GUIDE_V1_5_CN.md)** - AI-oriented guide for the 50 unified tools in Chinese
 - **[📖 Legacy Feature Guide (English)](FEATURE_GUIDE_EN.md)** - Legacy 1.4 and earlier tool reference

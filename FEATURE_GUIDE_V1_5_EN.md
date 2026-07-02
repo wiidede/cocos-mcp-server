@@ -1,10 +1,13 @@
 # Cocos Creator MCP Server 1.5.0 Tool Guide
 
+**🎯 New to this plugin? Start with [Common Workflows Guide](FEATURE_GUIDE_V1_5_WORKFLOWS.md) for step-by-step examples!**
+
 ## Overview
 
 This document is the AI-oriented guide for the 1.5.0 tool system.
 
 - Legacy 1.4 reference: [FEATURE_GUIDE_EN.md](FEATURE_GUIDE_EN.md)
+- **Common workflows and examples**: [FEATURE_GUIDE_V1_5_WORKFLOWS.md](FEATURE_GUIDE_V1_5_WORKFLOWS.md)
 - The 1.4 guide is based on the old fine-grained tool surface
 - The 1.5 guide is based on 50 unified tools plus the `action` pattern
 

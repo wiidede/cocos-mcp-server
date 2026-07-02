@@ -3,17 +3,11 @@
  * 注册/执行/记录测试用例。串行执行，setup/teardown 真实场景。
  */
 
+import type { TestCase } from './metadata'
 import type { TestContext } from './setup'
 import { setupTestScene, sleep, teardownTestScene } from './setup'
 
 export type TestStatus = 'pending' | 'running' | 'pass' | 'fail' | 'skip'
-
-export interface TestCase {
-  name: string
-  group: string
-  description: string
-  run: (ctx: TestContext) => Promise<void>
-}
 
 export interface TestStep {
   name: string
@@ -169,6 +163,101 @@ export class TestRunner {
       stack,
       steps,
       scenePath,
+    }
+  }
+
+  // 新增：按标签过滤运行测试
+  async runByTags(tags: string[], onProgress?: (result: TestResult) => void): Promise<TestResult[]> {
+    const filtered = this.cases.filter(c =>
+      tags.some(tag => c.tags?.includes(tag)),
+    )
+
+    if (filtered.length === 0) {
+      console.warn(`[TestRunner] No tests found with tags: ${tags.join(', ')}`)
+      return []
+    }
+
+    console.log(`[TestRunner] Running ${filtered.length} tests with tags: ${tags.join(', ')}`)
+
+    if (this.running) {
+      throw new Error('TestRunner is already running')
+    }
+    this.running = true
+    try {
+      const results: TestResult[] = []
+      for (const c of filtered) {
+        const r = await this.execute(c)
+        this.results.set(c.name, r)
+        results.push(r)
+        onProgress?.(r)
+      }
+      return results
+    }
+    finally {
+      this.running = false
+    }
+  }
+
+  // 新增：只运行核心测试（CI 快速检查）
+  async runCoreTests(onProgress?: (result: TestResult) => void): Promise<TestResult[]> {
+    return this.runByTags(['core', 'critical'], onProgress)
+  }
+
+  // 新增：只运行回归测试
+  async runRegressionTests(onProgress?: (result: TestResult) => void): Promise<TestResult[]> {
+    return this.runByTags(['regression'], onProgress)
+  }
+
+  // 新增：获取所有可用标签
+  getAvailableTags(): string[] {
+    const tags = new Set<string>()
+    this.cases.forEach((c) => {
+      c.tags?.forEach(tag => tags.add(tag))
+    })
+    return Array.from(tags).sort()
+  }
+
+  // 新增：按名称获取测试的标签（供 UI 过滤使用，避免直接访问私有 cases）
+  getTagsForTest(name: string): string[] {
+    const c = this.cases.find(x => x.name === name)
+    return c?.tags ?? []
+  }
+
+  // 新增：生成测试统计报告
+  generateReport() {
+    const results = Array.from(this.results.values())
+    const byGroup = new Map<string, TestResult[]>()
+    const byTag = new Map<string, TestResult[]>()
+
+    results.forEach((r) => {
+      // 按 group 分组
+      if (!byGroup.has(r.group)) {
+        byGroup.set(r.group, [])
+      }
+      byGroup.get(r.group)!.push(r)
+
+      // 按 tag 分组
+      const testCase = this.cases.find(c => c.name === r.name)
+      testCase?.tags?.forEach((tag) => {
+        if (!byTag.has(tag)) {
+          byTag.set(tag, [])
+        }
+        byTag.get(tag)!.push(r)
+      })
+    })
+
+    return {
+      total: results.length,
+      passed: results.filter(r => r.status === 'pass').length,
+      failed: results.filter(r => r.status === 'fail').length,
+      skipped: results.filter(r => r.status === 'skip').length,
+      duration: results.reduce((sum, r) => sum + r.duration, 0),
+      byGroup: Object.fromEntries(byGroup),
+      byTag: Object.fromEntries(byTag),
+      regressions: results.filter((r) => {
+        const testCase = this.cases.find(c => c.name === r.name)
+        return testCase?.regression != null
+      }),
     }
   }
 }

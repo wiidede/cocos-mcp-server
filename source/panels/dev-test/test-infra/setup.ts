@@ -43,7 +43,7 @@ export async function setupTestScene(): Promise<TestContext> {
   }
   step('create test scene', true, TEST_SCENE_PATH)
 
-  // 3) 等待场景就绪
+  // 2) 等待场景就绪
   let ready = false
   for (let i = 0; i < 20; i++) {
     try {

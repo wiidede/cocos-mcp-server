@@ -1,0 +1,20 @@
+/**
+ * 回归测试集合
+ *
+ * 所有已修复 bug 的回归测试
+ */
+
+// 合并所有回归测试
+import { batch1Tests } from './batch-1'
+import { batch2Tests } from './batch-2'
+import { batch3Tests } from './batch-3'
+
+export { batch1Tests } from './batch-1'
+export { batch2Tests } from './batch-2'
+export { batch3Tests } from './batch-3'
+
+export const allRegressionTests = [
+  ...batch1Tests,
+  ...batch2Tests,
+  ...batch3Tests,
+]

@@ -12,6 +12,7 @@
 
 ## 快速链接
 
+- **[🎯 常见工作流 (English)](FEATURE_GUIDE_V1_5_WORKFLOWS.md)** - ⭐ **从这里开始！** 典型游戏开发任务的分步指南
 - **[📖 1.5 Tool Guide (English)](FEATURE_GUIDE_V1_5_EN.md)** - 面向 AI 调用的 50 个统一工具说明（英文）
 - **[📖 1.5 工具说明 (中文)](FEATURE_GUIDE_V1_5_CN.md)** - 面向 AI 调用的 50 个统一工具说明
 - **[📖 Legacy Feature Guide (English)](FEATURE_GUIDE_EN.md)** - 1.4 及更早版本的旧工具体系说明

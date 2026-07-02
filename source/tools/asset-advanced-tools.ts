@@ -1,6 +1,8 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { Buffer } from 'node:buffer'
 import fs from 'node:fs'
 import path from 'node:path'
+import zlib from 'node:zlib'
 
 export class AssetAdvancedTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -214,6 +216,33 @@ export class AssetAdvancedTools implements ToolExecutor {
           },
         },
       },
+      {
+        name: 'create_default_spriteframe',
+        description: 'Create a 1x1 (or custom size) solid-color PNG + SpriteFrame asset and return its UUID. '
+          + 'Useful when the project has no texture assets yet (e.g. fresh project). '
+          + 'Returns the SpriteFrame sub-asset UUID (the value to assign to cc.Sprite.spriteFrame).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            color: {
+              type: 'string',
+              description: 'CSS color (e.g. "#ffffff", "#ff0000", "red"). Default: white.',
+              default: '#ffffff',
+            },
+            size: {
+              type: 'number',
+              description: 'Edge size in pixels (1, 2, 4, 8, 16, 32, ...). Default: 4.',
+              default: 4,
+              minimum: 1,
+              maximum: 1024,
+            },
+            savePath: {
+              type: 'string',
+              description: 'Where to write the PNG. Default: db://assets/__default_textures__/white_{hex}.png',
+            },
+          },
+        },
+      },
     ]
   }
 
@@ -241,6 +270,8 @@ export class AssetAdvancedTools implements ToolExecutor {
         return await this.compressTextures(args.directory, args.format, args.quality)
       case 'export_asset_manifest':
         return await this.exportAssetManifest(args.directory, args.format, args.includeMetadata)
+      case 'create_default_spriteframe':
+        return await this.createDefaultSpriteframe(args.color, args.size, args.savePath)
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -616,5 +647,212 @@ export class AssetAdvancedTools implements ToolExecutor {
 
     xml += '</assets>'
     return xml
+  }
+
+  // ====== create_default_spriteframe ======
+
+  private parseColorToRGBA(input: string): [number, number, number, number] {
+    const s = String(input ?? '').trim()
+    // #rgb / #rrggbb / #rrggbbaa
+    if (s.startsWith('#')) {
+      let hex = s.slice(1)
+      if (hex.length === 3)
+        hex = hex.split('').map(c => c + c).join('')
+      if (hex.length === 6)
+        hex += 'ff'
+      if (hex.length !== 8)
+        throw new Error(`Invalid hex color: ${input}`)
+      const r = Number.parseInt(hex.slice(0, 2), 16)
+      const g = Number.parseInt(hex.slice(2, 4), 16)
+      const b = Number.parseInt(hex.slice(4, 6), 16)
+      const a = Number.parseInt(hex.slice(6, 8), 16)
+      return [r, g, b, a]
+    }
+    // named colors (minimal set)
+    const named: Record<string, [number, number, number, number]> = {
+      white: [255, 255, 255, 255],
+      black: [0, 0, 0, 255],
+      red: [255, 0, 0, 255],
+      green: [0, 255, 0, 255],
+      blue: [0, 0, 255, 255],
+      yellow: [255, 255, 0, 255],
+      cyan: [0, 255, 255, 255],
+      magenta: [255, 0, 255, 255],
+      gray: [128, 128, 128, 255],
+      grey: [128, 128, 128, 255],
+    }
+    const lower = s.toLowerCase()
+    if (named[lower])
+      return named[lower]
+    throw new Error(`Unsupported color: ${input}. Use #RRGGBB, #RRGGBBAA, or a CSS name (white/black/red/green/blue/yellow/cyan/magenta/gray).`)
+  }
+
+  /**
+   * Generate a solid-color PNG of NxN pixels.
+   * Returns a Buffer containing the full PNG file.
+   */
+  private buildSolidPNG(size: number, r: number, g: number, b: number, a: number): Buffer {
+    // CRC32 table
+    const crcTable: number[] = Array.from({ length: 256 })
+    for (let n = 0; n < 256; n++) {
+      let c = n
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)
+      crcTable[n] = c >>> 0
+    }
+    const crc32 = (buf: Buffer): number => {
+      let c = 0xFFFFFFFF
+      for (let i = 0; i < buf.length; i++) c = (crcTable[(c ^ buf[i]) & 0xFF] ^ (c >>> 8)) >>> 0
+      return (c ^ 0xFFFFFFFF) >>> 0
+    }
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const len = Buffer.alloc(4)
+      len.writeUInt32BE(data.length, 0)
+      const typeBuf = Buffer.from(type, 'ascii')
+      const crcBuf = Buffer.alloc(4)
+      crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0)
+      return Buffer.concat([len, typeBuf, data, crcBuf])
+    }
+    // IHDR
+    const ihdr = Buffer.alloc(13)
+    ihdr.writeUInt32BE(size, 0) // width
+    ihdr.writeUInt32BE(size, 4) // height
+    ihdr.writeUInt8(8, 8) // bit depth
+    ihdr.writeUInt8(6, 9) // color type 6 = RGBA
+    ihdr.writeUInt8(0, 10) // compression
+    ihdr.writeUInt8(0, 11) // filter
+    ihdr.writeUInt8(0, 12) // interlace
+    // Scanlines: each row prefixed with filter byte 0, then RGBA
+    const row = Buffer.alloc(1 + size * 4)
+    row[0] = 0
+    for (let x = 0; x < size; x++) {
+      const o = 1 + x * 4
+      row[o] = r
+      row[o + 1] = g
+      row[o + 2] = b
+      row[o + 3] = a
+    }
+    const scanlines: Buffer[] = []
+    for (let n = 0; n < size; n++) scanlines.push(row)
+    const raw = Buffer.concat(scanlines)
+    const idatData = zlib.deflateSync(raw)
+    // Assemble
+    const sig = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    return Buffer.concat([
+      sig,
+      chunk('IHDR', ihdr),
+      chunk('IDAT', idatData),
+      chunk('IEND', Buffer.alloc(0)),
+    ])
+  }
+
+  private async createDefaultSpriteframe(color: string = '#ffffff', size: number = 4, savePath?: string): Promise<ToolResponse> {
+    try {
+      const [r, g, b, a] = this.parseColorToRGBA(color)
+      const hex = `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+      const targetPath = savePath || `db://assets/__default_textures__/white_${hex}_${size}px.png`
+      const buffer = this.buildSolidPNG(size, r, g, b, a)
+      // Resolve project absolute path. Editor.Project.path is the canonical way in Cocos Creator.
+      // Fall back to legacy asset-db message if needed.
+      let projectPath: string | undefined
+      try {
+        // Editor is a Cocos global
+        projectPath = (globalThis as any).Editor?.Project?.path
+      }
+      catch { /* ignore */ }
+      if (!projectPath) {
+        try {
+          const info: any = await Editor.Message.request('asset-db', 'query-asset-info', 'db://assets')
+          if (info?.file)
+            projectPath = path.dirname(info.file)
+        }
+        catch { /* ignore */ }
+      }
+      if (!projectPath) {
+        try {
+          const info: any = await Editor.Message.request('asset-db', 'get-db-info')
+          if (info?.projectPath)
+            projectPath = info.projectPath
+        }
+        catch { /* ignore */ }
+      }
+      if (!projectPath) {
+        throw new Error('Cannot resolve project path (Editor.Project.path and asset-db queries all failed)')
+      }
+      const absPath = path.join(projectPath, targetPath.replace(/^db:\/\/assets\//, 'assets/'))
+      // Ensure dir exists
+      fs.mkdirSync(path.dirname(absPath), { recursive: true })
+      // 幂等化：如果文件已存在且内容完全一致，跳过 write + refresh，直接 query
+      let sameContent = false
+      if (fs.existsSync(absPath)) {
+        try {
+          const existing = fs.readFileSync(absPath)
+          if (Buffer.isBuffer(existing) && existing.equals(buffer)) {
+            sameContent = true
+          }
+        }
+        catch { /* ignore read errors, fall through to write */ }
+      }
+      if (!sameContent) {
+        fs.writeFileSync(absPath, buffer)
+        await Editor.Message.request('asset-db', 'refresh', targetPath)
+      }
+      // Wait for import (poll up to 5s)
+      let info: any = null
+      for (let i = 0; i < 25; i++) {
+        await new Promise(res => setTimeout(res, 200))
+        try {
+          info = await Editor.Message.request('asset-db', 'query-asset-info', targetPath)
+          if (info && info.uuid)
+            break
+        }
+        catch { /* not ready yet */ }
+      }
+      if (!info || !info.uuid) {
+        throw new Error(`Asset import timeout for ${targetPath}`)
+      }
+      // Find SpriteFrame sub-asset. subAssets can be:
+      //   - undefined (single-asset files, e.g. .txt) → fallback below
+      //   - Array<{ uuid, type, name, ... }> (newer Cocos)
+      //   - Object<uuid, { uuid, type, name, ... }> (older Cocos)
+      // Normalize to array first.
+      let subAssetArr: any[] = []
+      const rawSub = info.subAssets
+      if (Array.isArray(rawSub)) {
+        subAssetArr = rawSub
+      }
+      else if (rawSub && typeof rawSub === 'object') {
+        subAssetArr = Object.values(rawSub)
+      }
+      const spriteFrame = subAssetArr.find(s => s?.type === 'cc.SpriteFrame')
+        || subAssetArr.find(s => /sprite[-_]?frame/i.test(s?.name || ''))
+      if (!spriteFrame || !spriteFrame.uuid) {
+        const fallbackUuid = `${info.uuid}@f9941`
+        return {
+          success: true,
+          data: {
+            pngPath: targetPath,
+            pngUuid: info.uuid,
+            spriteFrameUuid: fallbackUuid,
+            warning: 'SpriteFrame sub-asset not found by name; returned "{baseUuid}@f9941" fallback',
+            cached: sameContent,
+          },
+        }
+      }
+      return {
+        success: true,
+        data: {
+          pngPath: targetPath,
+          pngUuid: info.uuid,
+          spriteFrameUuid: spriteFrame.uuid,
+          spriteFrameName: spriteFrame.name,
+            color: { r, g, b, a },
+            size,
+            cached: sameContent,
+        },
+      }
+    }
+    catch (err: any) {
+      return { success: false, error: err?.message ?? String(err) }
+    }
   }
 }

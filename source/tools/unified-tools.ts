@@ -530,9 +530,9 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_manage',
-        'Unified asset management tool. Actions: import, create, copy, move, delete, save, reimport, open_external.',
-        ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport', 'open_external'],
-        ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target', 'urlOrUUID'],
+        'Unified asset management tool. Actions: import, create, copy, move, delete, save, reimport, open_external, create_default_spriteframe.',
+        ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport', 'open_external', 'create_default_spriteframe'],
+        ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target', 'urlOrUUID', 'color', 'size', 'savePath'],
         args => this.routeLegacyAction('asset_manage', {
           import: 'project_import_asset',
           create: 'project_create_asset',
@@ -542,6 +542,7 @@ export class UnifiedTools {
           save: 'project_save_asset',
           reimport: 'project_reimport_asset',
           open_external: 'assetAdvanced_open_asset_external',
+          create_default_spriteframe: 'assetAdvanced_create_default_spriteframe',
         }, args),
       ),
       this.createTool(

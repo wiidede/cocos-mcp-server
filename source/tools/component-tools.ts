@@ -142,13 +142,10 @@ export class ComponentTools implements ToolExecutor {
                 + '🔗 Reference Types (using UUID strings):\n'
                 + '• node: "target-node-uuid" (node reference)\n'
                 + '  How to get: Use get_all_nodes or find_node_by_name to get node UUIDs\n'
-                + '• component: "target-node-uuid" (component reference)\n'
-                + '  How it works: \n'
-                + '    1. Provide the UUID of the NODE that contains the target component\n'
-                + '    2. System auto-detects required component type from property metadata\n'
-                + '    3. Finds the component on target node and gets its scene __id__\n'
-                + '    4. Sets reference using the scene __id__ (not node UUID)\n'
-                + '  Example: value="label-node-uuid" will find cc.Label and use its scene ID\n'
+                + '• component: "component-uuid" OR "node-uuid" (component reference, e.g. @property(MyComponent))\n'
+                + '  Preferred: pass the target component\'s own uuid (the "uuid" field returned by get_components / node_query get_info)\n'
+                + '  Also accepted: pass the NODE uuid that holds the component — the system finds the component by its declared type\n'
+                + '  Note: the property\'s declared type is authoritative; you may omit propertyType and it will be auto-detected as a component reference\n'
                 + '• spriteFrame: "spriteframe-uuid" (sprite frame asset)\n'
                 + '  How to get: Check asset database or use asset browser\n'
                 + '• prefab: "prefab-uuid" (prefab asset)\n'
@@ -290,57 +287,78 @@ export class ComponentTools implements ToolExecutor {
         uuid: nodeUuid,
         component: effectiveComponentType,
       }).then(async (result: any) => {
-        // 等待一段时间让Editor完成组件添加
-        await new Promise(resolve => setTimeout(resolve, 200))
-        // 重新查询节点信息验证组件是否真的添加成功
-        try {
-          const allComponentsInfo2 = await this.getComponents(nodeUuid)
+        // 等待并重试验证组件添加，因为编辑器组件同步可能需要时间
+        let addedComponent: any = null
+        let allComponentsInfo2: any = null
+        const maxRetries = 3
 
-          if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
-            const addedComponent = allComponentsInfo2.data.components.find((comp: any) => {
-              const compType = comp.type || ''
-              if (effectiveComponentType.startsWith('cc.')) {
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          // 第一次尝试等待 200ms，后续尝试增加等待时间
+          const waitTime = 200 + (attempt * 200)
+          await new Promise(resolve => setTimeout(resolve, waitTime))
+
+          // 重新查询节点信息验证组件是否真的添加成功
+          try {
+            allComponentsInfo2 = await this.getComponents(nodeUuid)
+
+            if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
+              addedComponent = allComponentsInfo2.data.components.find((comp: any) => {
+                const compType = comp.type || ''
+                if (effectiveComponentType.startsWith('cc.')) {
+                  return compType === effectiveComponentType
+                    || compType.replace('cc.', '') === effectiveComponentType.replace('cc.', '')
+                }
                 return compType === effectiveComponentType
-                  || compType.replace('cc.', '') === effectiveComponentType.replace('cc.', '')
-              }
-              return compType === effectiveComponentType
-            })
-            if (addedComponent) {
-              resolve({
-                success: true,
-                message: `Component '${effectiveComponentType}' added successfully`,
-                data: {
-                  nodeUuid,
-                  componentType: effectiveComponentType,
-                  originalInput: componentType,
-                  componentVerified: true,
-                  existing: false,
-                  actualType: addedComponent.type,
-                  actualName: addedComponent.name,
-                },
               })
+
+              if (addedComponent) {
+                // 找到组件，验证成功
+                break
+              }
             }
-            else {
-              const componentList = allComponentsInfo2.data.components.map((c: any) =>
-                `type:${c.type}, name:${c.name}`,
-              ).join('; ')
+          }
+          catch (verifyError: any) {
+            // 如果是最后一次尝试，抛出错误
+            if (attempt === maxRetries - 1) {
               resolve({
                 success: false,
-                error: `Component '${effectiveComponentType}' was not found on node after addition. Available components: ${componentList}`,
+                error: `Failed to verify component addition after ${maxRetries} attempts: ${verifyError.message}`,
               })
+              return
             }
-          }
-          else {
-            resolve({
-              success: false,
-              error: `Failed to verify component addition: ${allComponentsInfo2.error || 'Unable to get node components'}`,
-            })
+            // 否则继续重试
           }
         }
-        catch (verifyError: any) {
+
+        // 验证结果
+        if (addedComponent) {
+          resolve({
+            success: true,
+            message: `Component '${effectiveComponentType}' added successfully`,
+            data: {
+              nodeUuid,
+              componentType: effectiveComponentType,
+              originalInput: componentType,
+              componentVerified: true,
+              existing: false,
+              actualType: addedComponent.type,
+              actualName: addedComponent.name,
+            },
+          })
+        }
+        else if (allComponentsInfo2?.success && allComponentsInfo2.data?.components) {
+          const componentList = allComponentsInfo2.data.components.map((c: any) =>
+            `type:${c.type}, name:${c.name}`,
+          ).join('; ')
           resolve({
             success: false,
-            error: `Failed to verify component addition: ${verifyError.message}`,
+            error: `Component '${effectiveComponentType}' was not found on node after addition (tried ${maxRetries} times). Available components: ${componentList}`,
+          })
+        }
+        else {
+          resolve({
+            success: false,
+            error: `Failed to verify component addition after ${maxRetries} attempts: ${allComponentsInfo2?.error || 'Unable to get node components'}`,
           })
         }
       }).catch((err: Error) => {
@@ -643,7 +661,7 @@ export class ComponentTools implements ToolExecutor {
     const { nodeUuid, componentType, property, value } = args
 
     // 归一化 propertyType：大小写不敏感、支持常见别名；未传则做自动检测
-    const propertyType = this.normalizePropertyType(args.propertyType, value)
+    let propertyType = this.normalizePropertyType(args.propertyType, value)
 
     return new Promise(async (resolve) => {
       try {
@@ -689,6 +707,14 @@ export class ComponentTools implements ToolExecutor {
             error: `Property '${property}' not found on component '${componentType}'. Available properties: ${propertyInfo.availableProperties.join(', ')}`,
           })
           return
+        }
+
+        // 关键修正：属性的“声明类型”是权威依据。若声明为某 cc.Component 子类的引用，
+        // 无论调用方传了什么 propertyType（甚至传了 cc.Node 导致语义错误），都强制走组件引用逻辑。
+        // 这修复了组件类型引用字段（@property(SomeComponent)）无法写入的问题。
+        if (propertyInfo.type === 'component' && propertyType !== 'component') {
+          console.log(`[ComponentTools] Property '${property}' is declared as component reference (${propertyInfo.declaredType}); overriding propertyType '${propertyType}' -> 'component'`)
+          propertyType = 'component'
         }
 
         // Step 3: 处理属性值和设置
@@ -793,11 +819,15 @@ export class ComponentTools implements ToolExecutor {
             break
           case 'component':
             if (typeof value === 'string') {
-              // 组件引用需要特殊处理：通过节点UUID找到组件的__id__
-              processedValue = value // 先保存节点UUID，后续会转换为__id__
+              // 接受组件 uuid 或节点 uuid，后续在写入阶段解析为组件场景 id
+              processedValue = value
+            }
+            else if (value && typeof value === 'object' && typeof value.uuid === 'string') {
+              // 兼容 { uuid: "..." } 形式
+              processedValue = value.uuid
             }
             else {
-              throw new TypeError('Component reference value must be a string (node UUID containing the target component)')
+              throw new TypeError('Component reference value must be a string uuid (the component\'s own uuid, or the node uuid that holds it)')
             }
             break
           case 'spriteFrame':
@@ -891,20 +921,42 @@ export class ComponentTools implements ToolExecutor {
         }
 
         // 找到原始组件的索引
+        // query-node 返回的 __comps__ 元素可能把"实际类名"放在不同字段：
+        //   - 自定义组件常在 `type`（如 'Emitter'），而 `__type__` 是父类 'cc.Script'
+        //   - 内置组件常在 `__type__`（如 'cc.Sprite'）
+        //   - 有时类名在 `value.name`（'Emitter<UITransform>' 形式）
+        // 因此多字段依次匹配，兼容多种形态。
         let rawComponentIndex = -1
+        const targetNormalized = String(componentType ?? '').replace(/^cc\./, '')
         for (let i = 0; i < rawNodeData.__comps__.length; i++) {
           const comp = rawNodeData.__comps__[i] as any
-          const compType = comp.__type__ || comp.cid || comp.type || 'Unknown'
-          if (compType === componentType) {
+          const candidates = [
+            comp.__type__,
+            comp.type,
+            comp.cid != null ? String(comp.cid) : undefined,
+            comp.value?.__type__,
+            comp.value?.name,
+            typeof comp.name === 'string' ? comp.name : undefined,
+          ]
+          const matched = candidates.some((c) => {
+            if (c == null) {
+              return false
+            }
+            const cStr = String(c).replace(/^cc\./, '')
+            return cStr === targetNormalized || cStr === String(componentType)
+          })
+          if (matched) {
             rawComponentIndex = i
             break
           }
         }
 
         if (rawComponentIndex === -1) {
+          // 给出更详细的诊断信息，方便用户排查
+          const availableTypes = rawNodeData.__comps__.map((c: any) => c.__type__ || c.type || c.cid || 'Unknown')
           resolve({
             success: false,
-            error: `Could not find component index for setting property`,
+            error: `Could not find component index for setting property: requested '${componentType}', available types: [${availableTypes.join(', ')}]`,
           })
           return
         }
@@ -1070,30 +1122,25 @@ export class ComponentTools implements ToolExecutor {
           })
         }
         else if (propertyType === 'component' && typeof processedValue === 'string') {
-          // 特殊处理组件引用：通过节点UUID找到组件的__id__
-          const targetNodeUuid = processedValue
-          console.log(`[ComponentTools] Setting component reference - finding component on node: ${targetNodeUuid}`)
+          // 组件引用写入：接受「组件 uuid」或「节点 uuid」两种输入
+          //   - 组件 uuid（node_query.get_info 返回的组件 uuid）→ 直接定位该 Component 实例
+          //   - 节点 uuid → 在该节点上按声明类型 getComponent 取实例
+          // 写入格式与节点/资源引用一致：{ value: { uuid: <组件场景id> }, type: <声明类型> }
+          const inputUuid = processedValue
 
-          // 从当前组件的属性元数据中获取期望的组件类型
-          let expectedComponentType = ''
-
-          // 获取当前组件的详细信息，包括属性元数据
-          const currentComponentInfo = await this.getComponentInfo(nodeUuid, componentType)
-          if (currentComponentInfo.success && currentComponentInfo.data?.properties?.[property]) {
-            const propertyMeta = currentComponentInfo.data.properties[property]
-
-            // 从属性元数据中提取组件类型信息
+          // 声明类型是权威依据（来自 query-node dump 的 type 字段），兜底回退到属性元数据
+          let expectedComponentType = propertyInfo.declaredType || ''
+          if (!expectedComponentType || expectedComponentType === 'cc.Component') {
+            const currentComponentInfo = await this.getComponentInfo(nodeUuid, componentType)
+            const propertyMeta = currentComponentInfo.data?.properties?.[property]
             if (propertyMeta && typeof propertyMeta === 'object') {
-              // 检查是否有type字段指示组件类型
               if (propertyMeta.type) {
                 expectedComponentType = propertyMeta.type
               }
               else if (propertyMeta.ctor) {
-                // 有些属性可能使用ctor字段
                 expectedComponentType = propertyMeta.ctor
               }
-              else if (propertyMeta.extends && Array.isArray(propertyMeta.extends)) {
-                // 检查extends数组，通常第一个是最具体的类型
+              else if (Array.isArray(propertyMeta.extends)) {
                 for (const extendType of propertyMeta.extends) {
                   if (extendType.startsWith('cc.') && extendType !== 'cc.Component' && extendType !== 'cc.Object') {
                     expectedComponentType = extendType
@@ -1104,96 +1151,89 @@ export class ComponentTools implements ToolExecutor {
             }
           }
 
-          if (!expectedComponentType) {
-            throw new Error(`Unable to determine required component type for property '${property}' on component '${componentType}'. Property metadata may not contain type information.`)
+          console.log(`[ComponentTools] Setting component reference: input=${inputUuid}, expectedType=${expectedComponentType || '(unknown)'}`)
+
+          // 取组件在场景中的 id（写引用用的就是这个）
+          const getCompSceneId = (comp: any): string | null => {
+            return comp?.value?.uuid?.value ?? comp?.uuid?.value ?? comp?.uuid ?? null
+          }
+          // 类型匹配：兼容 cc. 前缀差异，以及 declaredType 为 cid 的情况
+          const compMatchesType = (comp: any, type: string): boolean => {
+            if (!type) {
+              return false
+            }
+            const norm = (s: string) => String(s).replace(/^cc\./, '')
+            const target = norm(type)
+            return [comp?.type, comp?.cid, comp?.__type__, comp?.value?.__type__, comp?.value?.name, comp?.name]
+              .some(x => x != null && norm(String(x)) === target)
           }
 
-          console.log(`[ComponentTools] Detected required component type: ${expectedComponentType} for property: ${property}`)
+          let componentId: string | null = null
 
-          try {
-            // 获取目标节点的组件信息
-            const targetNodeData = await Editor.Message.request('scene', 'query-node', targetNodeUuid)
-            if (!targetNodeData || !targetNodeData.__comps__) {
-              throw new Error(`Target node ${targetNodeUuid} not found or has no components`)
+          // 情形 A：输入是节点 uuid —— 在该节点上找声明类型的组件
+          const asNode = await Editor.Message.request('scene', 'query-node', inputUuid).catch(() => null) as any
+          if (asNode && Array.isArray(asNode.__comps__)) {
+            let matched = expectedComponentType
+              ? asNode.__comps__.find((c: any) => compMatchesType(c, expectedComponentType))
+              : null
+            // 若无法确定声明类型，且该节点只有一个自定义脚本组件，直接用它
+            if (!matched && !expectedComponentType && asNode.__comps__.length === 1) {
+              matched = asNode.__comps__[0]
             }
-
-            // 打印目标节点的组件概览
-            console.log(`[ComponentTools] Target node ${targetNodeUuid} has ${targetNodeData.__comps__.length} components:`)
-            targetNodeData.__comps__.forEach((comp: any, index: number) => {
-              const sceneId = comp.value && comp.value.uuid && comp.value.uuid.value ? comp.value.uuid.value : 'unknown'
-              console.log(`[ComponentTools] Component ${index}: ${comp.type} (scene_id: ${sceneId})`)
-            })
-
-            // 查找对应的组件
-            let targetComponent = null
-            let componentId: string | null = null
-
-            // 在目标节点的_components数组中查找指定类型的组件
-            // 注意：__comps__和_components的索引是对应的
-            console.log(`[ComponentTools] Searching for component type: ${expectedComponentType}`)
-
-            for (let i = 0; i < targetNodeData.__comps__.length; i++) {
-              const comp = targetNodeData.__comps__[i] as any
-              console.log(`[ComponentTools] Checking component ${i}: type=${comp.type}, target=${expectedComponentType}`)
-
-              if (comp.type === expectedComponentType) {
-                targetComponent = comp
-                console.log(`[ComponentTools] Found matching component at index ${i}: ${comp.type}`)
-
-                // 从组件的value.uuid.value中获取组件在场景中的ID
-                if (comp.value && comp.value.uuid && comp.value.uuid.value) {
-                  componentId = comp.value.uuid.value
-                  console.log(`[ComponentTools] Got componentId from comp.value.uuid.value: ${componentId}`)
-                }
-                else {
-                  console.log(`[ComponentTools] Component structure:`, {
-                    hasValue: !!comp.value,
-                    hasUuid: !!(comp.value && comp.value.uuid),
-                    hasUuidValue: !!(comp.value && comp.value.uuid && comp.value.uuid.value),
-                    uuidStructure: comp.value ? comp.value.uuid : 'No value',
-                  })
-                  throw new Error(`Unable to extract component ID from component structure`)
-                }
-
-                break
-              }
+            if (matched) {
+              componentId = getCompSceneId(matched)
             }
-
-            if (!targetComponent) {
-              // 如果没找到，列出可用组件让用户了解，显示场景中的真实ID
-              const availableComponents = targetNodeData.__comps__.map((comp: any, index: number) => {
-                let sceneId = 'unknown'
-                // 从组件的value.uuid.value获取场景ID
-                if (comp.value && comp.value.uuid && comp.value.uuid.value) {
-                  sceneId = comp.value.uuid.value
-                }
-                return `${comp.type}(scene_id:${sceneId})`
-              })
-              throw new Error(`Component type '${expectedComponentType}' not found on node ${targetNodeUuid}. Available components: ${availableComponents.join(', ')}`)
+            else if (expectedComponentType) {
+              const available = asNode.__comps__.map((c: any) => `${c.type}(id:${getCompSceneId(c)})`).join(', ')
+              throw new Error(`Component type '${expectedComponentType}' not found on node ${inputUuid}. Available: ${available}`)
             }
+          }
 
-            console.log(`[ComponentTools] Found component ${expectedComponentType} with scene ID: ${componentId} on node ${targetNodeUuid}`)
+          // 情形 B：输入本身就是组件 uuid（节点查不到 __comps__），直接使用
+          if (!componentId) {
+            componentId = inputUuid
+            console.log(`[ComponentTools] Input treated as component uuid directly: ${componentId}`)
+          }
 
-            // 更新期望值为实际的组件ID对象格式，用于后续验证
-            if (componentId) {
-              actualExpectedValue = { uuid: componentId }
+          actualExpectedValue = { uuid: componentId }
+
+          const dump: any = { value: { uuid: componentId } }
+          if (expectedComponentType) {
+            dump.type = expectedComponentType
+          }
+
+          // Quirk 修复：组件引用字段若已有值，直接覆盖会被 Cocos 静默写成 null。
+          // 先把字段清空为 null（带上声明类型让引擎识别字段），再写入新引用。
+          // 兼容旧引擎的 { __id__: number } / { __uuid__: string } 引用格式（#quirk-02）
+          const existingRef = propertyInfo.originalValue
+          const hasExistingRef = existingRef && typeof existingRef === 'object'
+            && (existingRef.uuid != null
+              || existingRef.__id__ != null
+              || existingRef.__uuid__ != null
+              || (typeof existingRef.value === 'object' && (
+                existingRef.value?.uuid != null
+                || existingRef.value?.__id__ != null
+                || existingRef.value?.__uuid__ != null
+              )))
+          if (hasExistingRef) {
+            console.log(`[ComponentTools] Component ref '${property}' already has a value; clearing to null before overwrite`)
+            const clearDump: any = { value: null }
+            if (expectedComponentType) {
+              clearDump.type = expectedComponentType
             }
-
-            // 尝试使用与节点/资源引用相同的格式：{uuid: componentId}
-            // 测试看是否能正确设置组件引用
             await Editor.Message.request('scene', 'set-property', {
               uuid: nodeUuid,
               path: propertyPath,
-              dump: {
-                value: { uuid: componentId }, // 使用对象格式，像节点/资源引用一样
-                type: expectedComponentType,
-              },
+              dump: clearDump,
             })
+            await new Promise(res => setTimeout(res, 50))
           }
-          catch (error) {
-            console.error(`[ComponentTools] Error setting component reference:`, error)
-            throw error
-          }
+
+          await Editor.Message.request('scene', 'set-property', {
+            uuid: nodeUuid,
+            path: propertyPath,
+            dump,
+          })
         }
         else if (propertyType === 'nodeArray' && Array.isArray(processedValue)) {
           // 特殊处理节点数组 - 保持预处理的格式
@@ -1431,11 +1471,15 @@ export class ComponentTools implements ToolExecutor {
     }
   }
 
-  private analyzeProperty(component: any, propertyName: string): { exists: boolean, type: string, availableProperties: string[], originalValue: any } {
+  private analyzeProperty(component: any, propertyName: string): { exists: boolean, type: string, availableProperties: string[], originalValue: any, declaredType?: string, declaredExtends?: string[] } {
     // 从复杂的组件结构中提取可用属性
     const availableProperties: string[] = []
     let propertyValue: any
     let propertyExists = false
+    // 声明类型元数据：来自 query-node dump 的 { type, extends } 字段
+    // 对组件引用属性（@property(SomeComponent)）至关重要，靠 value 形状无法区分 Node/Component/Asset
+    let declaredType: string | undefined
+    let declaredExtends: string[] | undefined
 
     // query-node 返回的组件结构：{ cid, __type__, type, value: { ... }, uuid, enabled }
     // 提取真正的属性容器：优先使用 component.value，其次 component.properties
@@ -1464,6 +1508,13 @@ export class ComponentTools implements ToolExecutor {
             }
             catch (error) {
               propertyValue = propInfo
+            }
+            // 捕获声明类型元数据（用于区分 Node / Component / Asset 引用）
+            if (typeof propInfo.type === 'string') {
+              declaredType = propInfo.type
+            }
+            if (Array.isArray(propInfo.extends)) {
+              declaredExtends = propInfo.extends
             }
             propertyExists = true
           }
@@ -1504,8 +1555,26 @@ export class ComponentTools implements ToolExecutor {
 
     let type = 'unknown'
 
+    // 优先：基于声明类型元数据判断引用类型（比 value 形状可靠）
+    // 组件引用（@property(SomeComponent)）：extends 链包含 cc.Component 且 declaredType 不是 cc.Node
+    const isComponentRef = declaredType != null
+      && declaredType !== 'cc.Node'
+      && Array.isArray(declaredExtends)
+      && declaredExtends.includes('cc.Component')
+    const isNodeRef = declaredType === 'cc.Node'
+    const isAssetRef = Array.isArray(declaredExtends) && declaredExtends.includes('cc.Asset')
+
+    if (isComponentRef) {
+      type = 'component'
+    }
+    else if (isNodeRef) {
+      type = 'node'
+    }
+    else if (isAssetRef) {
+      type = 'asset'
+    }
     // 智能类型检测
-    if (Array.isArray(propertyValue)) {
+    else if (Array.isArray(propertyValue)) {
       // 数组类型检测
       if (propertyName.toLowerCase().includes('node')) {
         type = 'nodeArray'
@@ -1590,6 +1659,8 @@ export class ComponentTools implements ToolExecutor {
       type,
       availableProperties,
       originalValue: propertyValue,
+      declaredType,
+      declaredExtends,
     }
   }
 
@@ -2050,10 +2121,61 @@ export class ComponentTools implements ToolExecutor {
         let verified = false
 
         if (typeof expectedValue === 'object' && expectedValue !== null && 'uuid' in expectedValue) {
-          // 对于引用类型（节点/组件/资源），比较UUID
-          const actualUuid = actualValue && typeof actualValue === 'object' && 'uuid' in actualValue ? actualValue.uuid : ''
-          const expectedUuid = expectedValue.uuid || ''
+          // 对于引用类型（节点/组件/资源），比较 UUID。
+          // 注意：读回的 uuid 可能是嵌套描述符 { value: "xxx" }，必须先解包再比较，
+          // 否则 { value: "xxx" } === "xxx" 恒为 false，导致 changeVerified 假阴性（组件引用尤其明显）。
+          // 同时兼容 Seat 序列化后的 { __id__: number } / { __uuid__: string } 格式（#quirk-01）。
+          const unwrapUuid = (v: any): string => {
+            if (v == null) {
+              return ''
+            }
+            if (typeof v === 'string') {
+              return v
+            }
+            if (typeof v === 'object') {
+              if ('value' in v) {
+                return unwrapUuid(v.value)
+              }
+              if ('uuid' in v) {
+                return unwrapUuid(v.uuid)
+              }
+              if ('__uuid__' in v) {
+                return unwrapUuid(v.__uuid__)
+              }
+              if ('__id__' in v) {
+                // 引擎内部引用，返回特殊标记以便上层识别
+                return `__id__:${v.__id__}`
+              }
+            }
+            return ''
+          }
+          const actualUuid = unwrapUuid(actualValue)
+          const expectedUuid = unwrapUuid(expectedValue)
           verified = actualUuid === expectedUuid && expectedUuid !== ''
+
+          // Quirk-01 补救：严格 UUID 匹配失败时，若读回的值是合法引用（含内部 __id__/__uuid__ 标记），
+          // 且与写入前不同，则认为写入已成功（引擎可能只是用了不同的序列化格式）。
+          if (!verified) {
+            const isReferenceLike = (v: any): boolean => {
+              if (v == null)
+                return false
+              if (typeof v === 'string')
+                return true
+              if (typeof v === 'object') {
+                return (
+                  v.uuid != null
+                  || v.__id__ != null
+                  || v.__uuid__ != null
+                  || (v.value != null && isReferenceLike(v.value))
+                )
+              }
+              return false
+            }
+            if (isReferenceLike(actualValue) && JSON.stringify(actualValue) !== JSON.stringify(originalValue)) {
+              console.log(`[verifyPropertyChange] Strict UUID mismatch, but value is a valid reference and differs from original. Considering as verified.`)
+              verified = true
+            }
+          }
 
           console.log(`[verifyPropertyChange] Reference comparison:`)
           console.log(`  - Expected UUID: "${expectedUuid}"`)

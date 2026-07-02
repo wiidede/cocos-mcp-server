@@ -753,6 +753,51 @@ export class NodeTools implements ToolExecutor {
   }
 
   /**
+   * 把 value 规范化为 set-property API 期望的 dump 形态：
+   *   - 引用类型：{ __type__, __id__ } / { __type__, __uuid__ } / { uuid } → dump.value = { uuid }, dump.type = cc.Node|cc.Component|...
+   *   - ValueType (Color/Size/Vec2/Vec3)：原样 + dump.type 推导
+   *   - 其他：原样
+   */
+  private normalizeValueForDump(value: any, propertyName: string): { dumpValue: any, dumpType?: string } {
+    if (value === null || value === undefined) {
+      return { dumpValue: value }
+    }
+    if (Array.isArray(value)) {
+      return { dumpValue: value, dumpType: this.inferValueDumpType(value, propertyName) }
+    }
+    if (typeof value !== 'object') {
+      return { dumpValue: value }
+    }
+    const keys = Object.keys(value)
+    // 1) 引用类型：含 __id__ / __uuid__ / uuid 字段
+    if (keys.includes('__id__') || keys.includes('__uuid__') || keys.includes('uuid')) {
+      const refId: string = value.uuid || value.__id__ || value.__uuid__
+      let type: string | undefined = value.__type__
+      if (typeof type === 'string') {
+        if (type === 'Node' || type === 'cc.Node')
+          type = 'cc.Node'
+        else if (type === 'Component' || type === 'cc.Component')
+          type = 'cc.Component'
+        else if (!type.startsWith('cc.'))
+          type = `cc.${type}`
+      }
+      if (!type) {
+        // fallback：根据属性名猜
+        if (propertyName && /node|target|child|parent|root|container/i.test(propertyName)) {
+          type = 'cc.Node'
+        }
+        else {
+          type = 'cc.Asset'
+        }
+      }
+      return { dumpValue: { uuid: refId }, dumpType: type }
+    }
+    // 2) ValueType：自动推导 type
+    const dumpType = this.inferValueDumpType(value, propertyName)
+    return { dumpValue: value, dumpType }
+  }
+
+  /**
    * 根据 value 的 JSON 形状自动推导出 Cocos Creator 期望的 dump.type。
    * 缺省时 set-property API 对 Size/Color/Vec2/Vec3 等 ValueType 写入会"静默失败"。
    */
@@ -767,7 +812,7 @@ export class NodeTools implements ToolExecutor {
       return undefined
     }
     const keys = Object.keys(value)
-    // Node 引用：含 uuid 字段
+    // 引用类型：含 uuid 字段
     if (keys.includes('uuid') || keys.includes('__uuid__') || keys.includes('__id__')) {
       if (propertyName && /node|target|child|parent|root/i.test(propertyName)) {
         return 'cc.Node'
@@ -795,8 +840,8 @@ export class NodeTools implements ToolExecutor {
 
   private async setNodeProperty(uuid: string, property: string, value: any): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      const dumpType = this.inferValueDumpType(value, property)
-      const dump: any = { value }
+      const { dumpValue, dumpType } = this.normalizeValueForDump(value, property)
+      const dump: any = { value: dumpValue }
       if (dumpType) {
         dump.type = dumpType
       }
