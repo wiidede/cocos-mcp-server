@@ -6,6 +6,7 @@
 import { batch1Tests } from '../cases/regression/batch-1'
 import { batch2Tests } from '../cases/regression/batch-2'
 import { batch3Tests } from '../cases/regression/batch-3'
+import { batch4Tests } from '../cases/regression/batch-4'
 import { testRunner } from './runner'
 
 for (const c of batch1Tests) {
@@ -17,8 +18,11 @@ for (const c of batch2Tests) {
 for (const c of batch3Tests) {
   testRunner.register(c)
 }
+for (const c of batch4Tests) {
+  testRunner.register(c)
+}
 
-console.log(`[dev-test] registered ${batch1Tests.length} batch-1 + ${batch2Tests.length} batch-2 + ${batch3Tests.length} batch-3 regression tests`)
+console.log(`[dev-test] registered ${batch1Tests.length} batch-1 + ${batch2Tests.length} batch-2 + ${batch3Tests.length} batch-3 + ${batch4Tests.length} batch-4 regression tests`)
 
 export { testRunner }
 export type { TestCase } from './metadata'

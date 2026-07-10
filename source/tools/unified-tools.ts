@@ -690,9 +690,9 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_scene',
-        'Unified scene debugging tool. Actions: node_tree, validate, editor_info.',
+        'Unified scene debugging tool. Actions: node_tree, validate, editor_info. Validation checks scene performance only.',
         ['node_tree', 'validate', 'editor_info'],
-        ['rootUuid', 'maxDepth', 'checkMissingAssets', 'checkPerformance'],
+        ['rootUuid', 'maxDepth', 'checkPerformance'],
         args => this.routeLegacyAction('debug_scene', {
           node_tree: 'debug_get_node_tree',
           validate: 'debug_validate_scene',

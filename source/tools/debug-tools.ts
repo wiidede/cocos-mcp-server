@@ -102,15 +102,10 @@ export class DebugTools implements ToolExecutor {
       },
       {
         name: 'validate_scene',
-        description: 'Validate current scene for issues',
+        description: 'Validate current scene for performance issues',
         inputSchema: {
           type: 'object',
           properties: {
-            checkMissingAssets: {
-              type: 'boolean',
-              description: 'Check for missing asset references',
-              default: true,
-            },
             checkPerformance: {
               type: 'boolean',
               description: 'Check for performance issues',
@@ -275,56 +270,49 @@ export class DebugTools implements ToolExecutor {
   }
 
   private async getNodeTree(rootUuid?: string, maxDepth: number = 10): Promise<ToolResponse> {
-    return new Promise((resolve) => {
-      const buildTree = async (nodeUuid: string, depth: number = 0): Promise<any> => {
-        if (depth >= maxDepth) {
-          return { truncated: true }
+    try {
+      const sceneTree = await Editor.Message.request('scene', 'query-node-tree')
+      const findNode = (node: any): any => {
+        if (node.uuid === rootUuid) {
+          return node
         }
-
-        try {
-          const nodeData = await Editor.Message.request('scene', 'query-node', nodeUuid)
-
-          const tree = {
-            uuid: nodeData.uuid,
-            name: nodeData.name,
-            active: nodeData.active,
-            components: (nodeData as any).components ? (nodeData as any).components.map((c: any) => c.__type__) : [],
-            childCount: nodeData.children ? nodeData.children.length : 0,
-            children: [] as any[],
+        for (const child of node.children || []) {
+          const match = findNode(child)
+          if (match) {
+            return match
           }
-
-          if (nodeData.children && nodeData.children.length > 0) {
-            for (const childId of nodeData.children) {
-              const childTree = await buildTree(childId, depth + 1)
-              tree.children.push(childTree)
-            }
+        }
+        return null
+      }
+      const buildTree = (node: any, depth: number = 0): any => {
+        const children = node.children || []
+        const tree = {
+          uuid: node.uuid,
+          name: node.name,
+          active: node.active,
+          components: (node.__comps__ || []).map((component: any) => component.__type__ || component.type || 'Unknown'),
+          childCount: children.length,
+          children: [] as any[],
+        }
+        if (depth >= maxDepth) {
+          if (children.length > 0) {
+            tree.children.push({ truncated: true })
           }
-
           return tree
         }
-        catch (err: any) {
-          return { error: err.message }
-        }
+        tree.children = children.map((child: any) => buildTree(child, depth + 1))
+        return tree
       }
 
-      if (rootUuid) {
-        buildTree(rootUuid).then((tree) => {
-          resolve({ success: true, data: tree })
-        })
+      const root = rootUuid ? findNode(sceneTree) : sceneTree
+      if (!root) {
+        return { success: false, error: `Node with UUID ${rootUuid} not found` }
       }
-      else {
-        Editor.Message.request('scene', 'query-hierarchy').then(async (hierarchy: any) => {
-          const trees = []
-          for (const rootNode of hierarchy.children) {
-            const tree = await buildTree(rootNode.uuid)
-            trees.push(tree)
-          }
-          resolve({ success: true, data: trees })
-        }).catch((err: Error) => {
-          resolve({ success: false, error: err.message })
-        })
-      }
-    })
+      return { success: true, data: buildTree(root) }
+    }
+    catch (err: any) {
+      return { success: false, error: err.message }
+    }
   }
 
   private async getPerformanceStats(): Promise<ToolResponse> {
@@ -354,23 +342,10 @@ export class DebugTools implements ToolExecutor {
     const issues: ValidationIssue[] = []
 
     try {
-      // Check for missing assets
-      if (options.checkMissingAssets) {
-        const assetCheck = await Editor.Message.request('scene', 'check-missing-assets')
-        if (assetCheck && assetCheck.missing) {
-          issues.push({
-            type: 'error',
-            category: 'assets',
-            message: `Found ${assetCheck.missing.length} missing asset references`,
-            details: assetCheck.missing,
-          })
-        }
-      }
-
       // Check for performance issues
       if (options.checkPerformance) {
-        const hierarchy = await Editor.Message.request('scene', 'query-hierarchy')
-        const nodeCount = this.countNodes(hierarchy.children)
+        const hierarchy = await Editor.Message.request('scene', 'query-node-tree')
+        const nodeCount = this.countNodes([hierarchy])
 
         if (nodeCount > 1000) {
           issues.push({
