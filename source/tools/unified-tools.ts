@@ -233,7 +233,7 @@ export class UnifiedTools {
     return [
       this.createTool(
         'scene_management',
-        'Unified scene lifecycle tool. Actions: get_current, list, open, save, create, save_as, close.',
+        'Manage scene files and lifecycle. Query current scene before writes; save after structural changes when persistence is required. Actions: get_current, list, open, save, create, save_as, close.',
         ['get_current', 'list', 'open', 'save', 'create', 'save_as', 'close'],
         ['scenePath', 'sceneName', 'savePath', 'path', 'autoCreateCanvas'],
         args => this.routeLegacyAction('scene_management', {
@@ -248,7 +248,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_hierarchy',
-        'Unified scene hierarchy tool. Actions: get.',
+        'Read the editor scene hierarchy. Use this before node writes because node names are not unique. Actions: get.',
         ['get'],
         ['includeComponents'],
         args => this.routeLegacyAction('scene_hierarchy', {
@@ -257,7 +257,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_execution_control',
-        'Unified scene execution tool. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
+        'Run registered scene-side operations and readiness checks. Only call scene methods that are registered by Cocos or this extension. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
         ['execute_component_method', 'execute_scene_script', 'restore_prefab', 'soft_reload', 'query_ready', 'query_dirty'],
         ['uuid', 'nodeUuid', 'assetUuid', 'name', 'method', 'args'],
         args => this.routeLegacyAction('scene_execution_control', {
@@ -271,7 +271,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_snapshot',
-        'Unified scene snapshot tool. Actions: create, abort.',
+        'Create or abort editor scene snapshots around risky multi-step edits. Pair create/abort deliberately; prefer undo records for normal edits. Actions: create, abort.',
         ['create', 'abort'],
         [],
         args => this.routeLegacyAction('scene_snapshot', {
@@ -281,7 +281,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_query',
-        'Unified scene query tool. Actions: classes, components, nodes_by_asset_uuid, component_has_script, get_info.',
+        'Query scene-level classes, components, script usage, and asset references. Use before component or reference writes when exact types are unknown. Actions: classes, components, nodes_by_asset_uuid, component_has_script, get_info.',
         ['classes', 'components', 'nodes_by_asset_uuid', 'component_has_script', 'get_info'],
         ['extends', 'assetUuid', 'className'],
         args => this.routeLegacyAction('scene_query', {
@@ -294,7 +294,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_view_control',
-        'Unified scene view control tool. Actions: change_gizmo_tool, change_gizmo_pivot, change_gizmo_coordinate, change_view_mode, set_grid_visible, set_icon_gizmo_3d, set_icon_gizmo_size, focus_camera_on_nodes, align_camera_with_view, align_view_with_node, reset.',
+        'Control the editor scene view and camera. Pass UUIDs from node_query/scene_hierarchy; use query tool first when current view state matters. Actions: change_gizmo_tool, change_gizmo_pivot, change_gizmo_coordinate, change_view_mode, set_grid_visible, set_icon_gizmo_3d, set_icon_gizmo_size, focus_camera_on_nodes, align_camera_with_view, align_view_with_node, reset.',
         ['change_gizmo_tool', 'change_gizmo_pivot', 'change_gizmo_coordinate', 'change_view_mode', 'set_grid_visible', 'set_icon_gizmo_3d', 'set_icon_gizmo_size', 'focus_camera_on_nodes', 'align_camera_with_view', 'align_view_with_node', 'reset'],
         ['name', 'type', 'visible', 'is3D', 'size', 'is2D', 'uuids'],
         args => this.routeLegacyAction('scene_view_control', {
@@ -313,7 +313,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_view_query',
-        'Unified scene view query tool. Actions: get_status, gizmo_tool, gizmo_pivot, gizmo_view_mode, gizmo_coordinate, view_mode, grid_visible, icon_gizmo_3d, icon_gizmo_size.',
+        'Query editor scene view state before view or camera changes. Actions: get_status, gizmo_tool, gizmo_pivot, gizmo_view_mode, gizmo_coordinate, view_mode, grid_visible, icon_gizmo_3d, icon_gizmo_size.',
         ['get_status', 'gizmo_tool', 'gizmo_pivot', 'gizmo_view_mode', 'gizmo_coordinate', 'view_mode', 'grid_visible', 'icon_gizmo_3d', 'icon_gizmo_size'],
         [],
         args => this.routeLegacyAction('scene_view_query', {
@@ -330,7 +330,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_undo_manage',
-        'Unified scene undo tool. Actions: begin, end, cancel.',
+        'Manage editor undo records for multi-step scene edits. Always end or cancel an opened record. Actions: begin, end, cancel.',
         ['begin', 'end', 'cancel'],
         ['nodeUuid', 'uuid'],
         args => this.routeLegacyAction('scene_undo_manage', {
@@ -341,7 +341,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_query',
-        'Unified node query tool. Actions: get_info, find, find_by_name, get_all, detect_type.',
+        'Query nodes by UUID, name, pattern, or list all nodes. Use before write operations because node names are not unique. Actions: get_info, find, find_by_name, get_all, detect_type.',
         ['get_info', 'find', 'find_by_name', 'get_all', 'detect_type'],
         ['uuid', 'pattern', 'name', 'exactMatch'],
         args => this.routeLegacyAction('node_query', {
@@ -354,7 +354,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_lifecycle',
-        'Unified node lifecycle tool. Actions: create, delete, duplicate.',
+        'Create, delete, or duplicate nodes. Use node_query/scene_hierarchy first for target UUIDs; names are not stable identifiers. Actions: create, delete, duplicate.',
         ['create', 'delete', 'duplicate'],
         ['name', 'uuid', 'parentUuid', 'nodeType', 'siblingIndex', 'assetUuid', 'assetPath', 'unlinkPrefab', 'keepWorldTransform', 'includeChildren', 'position', 'rotation', 'scale'],
         args => this.routeLegacyAction('node_lifecycle', {
@@ -365,7 +365,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_transform',
-        'Unified node transform tool. Actions: set_transform, set_property.',
+        'Set node transform or direct node property by UUID. Query the node first and prefer set_transform for position/rotation/scale. Actions: set_transform, set_property.',
         ['set_transform', 'set_property'],
         ['uuid', 'property', 'value', 'position', 'rotation', 'scale'],
         args => this.routeLegacyAction('node_transform', {
@@ -375,7 +375,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_hierarchy',
-        'Unified node hierarchy tool. Actions: move, copy, paste, cut.',
+        'Move nodes or use editor clipboard operations. Use UUIDs from node_query; keepWorldTransform controls whether visual placement is preserved. Actions: move, copy, paste, cut.',
         ['move', 'copy', 'paste', 'cut'],
         ['uuid', 'uuids', 'nodeUuid', 'newParentUuid', 'target', 'keepWorldTransform', 'siblingIndex'],
         args => this.routeLegacyAction('node_hierarchy', {
@@ -387,7 +387,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_clipboard',
-        'Unified node clipboard tool. Actions: copy, paste, cut.',
+        'Copy, paste, or cut nodes through the editor clipboard. Prefer node_hierarchy.move for pure reparenting. Actions: copy, paste, cut.',
         ['copy', 'paste', 'cut'],
         ['uuids', 'target', 'keepWorldTransform'],
         args => this.routeLegacyAction('node_clipboard', {
@@ -398,7 +398,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_property_management',
-        'Unified node property management tool. Actions: reset_property, reset_transform, move_array_element, remove_array_element.',
+        'Reset node properties/transforms or edit array properties. Query node info first and pass exact property paths. Actions: reset_property, reset_transform, move_array_element, remove_array_element.',
         ['reset_property', 'reset_transform', 'move_array_element', 'remove_array_element'],
         ['uuid', 'path', 'target', 'offset', 'index'],
         args => this.routeLegacyAction('node_property_management', {
@@ -410,7 +410,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_reference',
-        'Unified node reference tool. Actions: nodes_by_asset_uuid, restore_prefab.',
+        'Find nodes that reference an asset or restore prefab linkage. Use asset_query to obtain assetUuid first. Actions: nodes_by_asset_uuid, restore_prefab.',
         ['nodes_by_asset_uuid', 'restore_prefab'],
         ['assetUuid', 'nodeUuid'],
         args => this.routeLegacyAction('node_reference', {
@@ -420,7 +420,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_manage',
-        'Unified component management tool. Actions: add, remove.',
+        'Add or remove components on a node. Before remove, call component_query.get_components and use the returned componentType or cid. Actions: add, remove.',
         ['add', 'remove'],
         ['nodeUuid', 'componentType'],
         args => this.routeLegacyAction('component_manage', {
@@ -430,7 +430,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_script',
-        'Unified script component tool. Actions: attach, detach.',
+        'Attach script components or detach existing components. Query components first before detach; scriptPath should point to the project script asset. Actions: attach, detach.',
         ['attach', 'detach'],
         ['nodeUuid', 'scriptPath', 'componentType'],
         args => this.routeLegacyAction('component_script', {
@@ -440,7 +440,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_query',
-        'Unified component query tool. Actions: get_components, get_info.',
+        'Query node components and component details. Use before component writes/removal to get actual componentType/cid and property names. Actions: get_components, get_info.',
         ['get_components', 'get_info'],
         ['nodeUuid', 'componentType', 'includeProperties'],
         args => this.routeLegacyAction('component_query', {
@@ -450,7 +450,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_property',
-        'Unified component property tool. Actions: set, set_property.',
+        'Set a component property on a node. Query components first when componentType/cid or property names are unknown. Actions: set, set_property.',
         ['set', 'set_property'],
         ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'],
         args => this.routeLegacyAction('component_property', {
@@ -460,14 +460,14 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_event_binding',
-        'Unified component event binding tool for button click events. Actions: get_button_events, clear_button_events, set_button_events, append_button_event.',
+        'Manage Button click event bindings. Query the Button component and target handler node first; set replaces all events, append preserves existing ones. Actions: get_button_events, clear_button_events, set_button_events, append_button_event.',
         ['get_button_events', 'clear_button_events', 'set_button_events', 'append_button_event'],
         ['nodeUuid', 'componentType', 'events', 'targetNodeUuid', 'component', 'handler', 'customEventData'],
         args => this.handleComponentEventBinding(args),
       ),
       this.createTool(
         'component_available',
-        'Unified component discovery tool. Actions: list.',
+        'List available component types for adding new components. Use component_query for components already on a node. Actions: list.',
         ['list'],
         ['category'],
         args => this.routeLegacyAction('component_available', {
@@ -476,7 +476,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_browse',
-        'Unified prefab browse tool. Actions: list, load, info, validate.',
+        'Browse and inspect prefab assets. Use this before instantiate/update when prefabPath is unknown. Actions: list, load, info, validate.',
         ['list', 'load', 'info', 'validate'],
         ['folder', 'prefabPath'],
         args => this.routeLegacyAction('prefab_browse', {
@@ -488,7 +488,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_lifecycle',
-        'Unified prefab lifecycle tool. Actions: create, duplicate.',
+        'Create prefab assets from nodes or duplicate prefab assets. Query node UUIDs and target save paths first. Actions: create, duplicate.',
         ['create', 'duplicate'],
         ['nodeUuid', 'savePath', 'prefabName', 'sourcePrefabPath', 'targetPrefabPath', 'newPrefabName'],
         args => this.routeLegacyAction('prefab_lifecycle', {
@@ -498,7 +498,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_instance',
-        'Unified prefab instance tool. Actions: instantiate, revert, restore_node, restore.',
+        'Instantiate prefabs or revert/restore prefab instances. Use prefab_browse/asset_query for prefab identity and node_query for instance UUIDs. Actions: instantiate, revert, restore_node, restore.',
         ['instantiate', 'revert', 'restore_node', 'restore'],
         ['prefabPath', 'parentUuid', 'position', 'nodeUuid', 'assetUuid'],
         args => this.routeLegacyAction('prefab_instance', {
@@ -510,7 +510,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_edit',
-        'Unified prefab edit tool. Actions: update, revert.',
+        'Apply or discard prefab instance overrides. Use update to write instance changes back to the prefab asset; use revert to discard them. Actions: update, revert.',
         ['update', 'revert'],
         ['prefabPath', 'nodeUuid'],
         args => this.routeLegacyAction('prefab_edit', {
@@ -520,7 +520,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_reference',
-        'Unified prefab reference tool. Actions: restore_node, nodes_by_asset_uuid.',
+        'Restore prefab nodes or find scene nodes using a prefab/asset UUID. Query assetUuid first. Actions: restore_node, nodes_by_asset_uuid.',
         ['restore_node', 'nodes_by_asset_uuid'],
         ['nodeUuid', 'assetUuid'],
         args => this.routeLegacyAction('prefab_reference', {
@@ -530,7 +530,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_manage',
-        'Unified asset management tool. Actions: import, create, copy, move, delete, save, reimport, open_external, create_default_spriteframe.',
+        'Create, import, move, delete, save, or reimport assets. Query/generate URLs first and distinguish asset URL from filesystem path. Actions: import, create, copy, move, delete, save, reimport, open_external, create_default_spriteframe.',
         ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport', 'open_external', 'create_default_spriteframe'],
         ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target', 'urlOrUUID', 'color', 'size', 'savePath'],
         args => this.routeLegacyAction('asset_manage', {
@@ -547,7 +547,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_query',
-        'Unified asset query tool. Actions: get_info, list, query_path, query_uuid, query_url, find_by_name, details, generate_available_url, db_ready.',
+        'Query asset database records, URLs, UUIDs, and paths. Use before asset writes and when converting between filesystem paths, asset URLs, and UUIDs. Actions: get_info, list, query_path, query_uuid, query_url, find_by_name, details, generate_available_url, db_ready.',
         ['get_info', 'list', 'query_path', 'query_uuid', 'query_url', 'find_by_name', 'details', 'generate_available_url', 'db_ready'],
         ['assetPath', 'folder', 'type', 'url', 'uuid', 'name', 'exactMatch', 'assetType', 'maxResults', 'includeSubAssets'],
         args => this.routeLegacyAction('asset_query', {
@@ -564,7 +564,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_analyze',
-        'Unified asset analysis tool. Actions: validate_references, dependencies, unused.',
+        'Analyze asset references, dependencies, and unused assets. Query exact asset URL/UUID first for focused dependency checks. Actions: validate_references, dependencies, unused.',
         ['validate_references', 'dependencies', 'unused'],
         ['directory', 'excludeDirectories', 'urlOrUUID', 'direction'],
         args => this.routeLegacyAction('asset_analyze', {
@@ -575,7 +575,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_batch',
-        'Unified asset batch tool. Actions: batch_import, batch_delete, compress_textures, export_manifest.',
+        'Run batch asset operations. Prefer dry planning with asset_query first; batch_delete is destructive. Actions: batch_import, batch_delete, compress_textures, export_manifest.',
         ['batch_import', 'batch_delete', 'compress_textures', 'export_manifest'],
         ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite', 'urls', 'directory', 'format', 'quality', 'includeMetadata'],
         args => this.routeLegacyAction('asset_batch', {
@@ -587,7 +587,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_meta',
-        'Unified asset meta tool. Actions: save_meta.',
+        'Write asset meta content. Use only after querying the target asset URL/UUID and preserving required meta fields. Actions: save_meta.',
         ['save_meta'],
         ['urlOrUUID', 'content'],
         args => this.routeLegacyAction('asset_meta', {
@@ -596,7 +596,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'project_manage',
-        'Unified project management tool. Actions: get_info, get_settings, refresh_assets.',
+        'Query project information/settings or refresh the asset database. Refresh after external file changes before querying new assets. Actions: get_info, get_settings, refresh_assets.',
         ['get_info', 'get_settings', 'refresh_assets'],
         ['category', 'folder'],
         args => this.routeLegacyAction('project_manage', {
@@ -607,7 +607,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'project_build_system',
-        'Unified build system tool. Actions: build, get_build_settings, open_build_panel, check_builder_status.',
+        'Inspect or trigger Cocos build workflows. Prefer get_build_settings/check_builder_status before build; open panel when manual configuration is needed. Actions: build, get_build_settings, open_build_panel, check_builder_status.',
         ['build', 'get_build_settings', 'open_build_panel', 'check_builder_status'],
         ['platform', 'debug'],
         args => this.routeLegacyAction('project_build_system', {
@@ -619,7 +619,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'project_runtime',
-        'Unified project runtime tool. Actions: run, start_preview_server, stop_preview_server.',
+        'Run project preview or manage preview server. Check current project/build state first when launch fails. Actions: run, start_preview_server, stop_preview_server.',
         ['run', 'start_preview_server', 'stop_preview_server'],
         ['platform', 'port'],
         args => this.routeLegacyAction('project_runtime', {
@@ -630,7 +630,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'project_asset_system',
-        'Unified project asset system tool. Actions: import, create, copy, move, delete, save, reimport.',
+        'Project asset CRUD wrapper. Prefer asset_manage/asset_query for new code; distinguish asset URL from filesystem path. Actions: import, create, copy, move, delete, save, reimport.',
         ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport'],
         ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target'],
         args => this.routeLegacyAction('project_asset_system', {
@@ -645,7 +645,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'project_query',
-        'Unified project query tool. Actions: assets, asset_info, asset_details, asset_path, asset_uuid, asset_url, find_asset_by_name.',
+        'Project asset query wrapper for assets, details, paths, UUIDs, and URLs. Prefer exact URL/UUID over names. Actions: assets, asset_info, asset_details, asset_path, asset_uuid, asset_url, find_asset_by_name.',
         ['assets', 'asset_info', 'asset_details', 'asset_path', 'asset_uuid', 'asset_url', 'find_asset_by_name'],
         ['type', 'folder', 'assetPath', 'includeSubAssets', 'url', 'uuid', 'name', 'exactMatch', 'assetType', 'maxResults'],
         args => this.routeLegacyAction('project_query', {
@@ -660,7 +660,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_console',
-        'Unified console debugging tool. Actions: get, clear.',
+        'Read or clear editor console logs. Use after failed tool calls to inspect runtime errors. Actions: get, clear.',
         ['get', 'clear'],
         ['limit', 'filter'],
         args => this.routeLegacyAction('debug_console', {
@@ -670,7 +670,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_logs',
-        'Unified project log tool. Actions: get_project_logs, get_log_file_info, search.',
+        'Read and search Cocos project/editor log files. Use targeted search patterns to reduce returned log volume. Actions: get_project_logs, get_log_file_info, search.',
         ['get_project_logs', 'get_log_file_info', 'search'],
         ['lines', 'filterKeyword', 'logLevel', 'pattern', 'maxResults', 'contextLines'],
         args => this.routeLegacyAction('debug_logs', {
@@ -681,7 +681,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_execute',
-        'Unified execution debugging tool. Actions: script.',
+        'Execute debugging scripts in the editor context. Use sparingly; prefer dedicated tools for normal scene/asset operations. Actions: script.',
         ['script'],
         ['script'],
         args => this.routeLegacyAction('debug_execute', {
@@ -690,7 +690,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_scene',
-        'Unified scene debugging tool. Actions: node_tree, validate, editor_info. Validation checks scene performance only.',
+        'Debug scene tree, performance-oriented validation, and editor info. Use node_tree for hierarchy reads; validate does not replace missing asset checks. Actions: node_tree, validate, editor_info.',
         ['node_tree', 'validate', 'editor_info'],
         ['rootUuid', 'maxDepth', 'checkPerformance'],
         args => this.routeLegacyAction('debug_scene', {
@@ -701,7 +701,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_performance',
-        'Unified performance debugging tool. Actions: stats.',
+        'Get editor/game performance stats for diagnosis. Actions: stats.',
         ['stats'],
         [],
         args => this.routeLegacyAction('debug_performance', {
@@ -710,7 +710,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'preferences_manage',
-        'Unified preferences tool. Actions: open, query, set, get_all, reset, export, import.',
+        'Open, query, set, reset, export, or import editor preferences. Query current values before set/reset. Actions: open, query, set, get_all, reset, export, import.',
         ['open', 'query', 'set', 'get_all', 'reset', 'export', 'import'],
         ['tab', 'args', 'name', 'path', 'value', 'type', 'exportPath', 'importPath'],
         args => this.routeLegacyAction('preferences_manage', {
@@ -725,7 +725,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'server_info',
-        'Unified server information tool. Actions: ip_list, sorted_ip_list, port, status.',
+        'Query MCP server address, port, and status metadata. Actions: ip_list, sorted_ip_list, port, status.',
         ['ip_list', 'sorted_ip_list', 'port', 'status'],
         [],
         args => this.routeLegacyAction('server_info', {
@@ -737,7 +737,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'server_network',
-        'Unified server network tool. Actions: connectivity, interfaces.',
+        'Check local network interfaces and MCP connectivity. Use when clients cannot connect. Actions: connectivity, interfaces.',
         ['connectivity', 'interfaces'],
         ['timeout'],
         args => this.routeLegacyAction('server_network', {
@@ -747,14 +747,14 @@ export class UnifiedTools {
       ),
       this.createTool(
         'server_control',
-        'Unified MCP server control metadata tool. Actions: health, settings, available_tools.',
+        'Query MCP server health, settings, and currently available tools. Use available_tools to see active filtered tool set. Actions: health, settings, available_tools.',
         ['health', 'settings', 'available_tools'],
         [],
         args => this.handleServerControl(args),
       ),
       this.createTool(
         'broadcast_message',
-        'Unified broadcast tool. Actions: get_log, listen, stop_listening, clear_log, active_listeners.',
+        'Inspect and manage Cocos editor broadcast listeners/logs. Stop listeners when no longer needed. Actions: get_log, listen, stop_listening, clear_log, active_listeners.',
         ['get_log', 'listen', 'stop_listening', 'clear_log', 'active_listeners'],
         ['limit', 'messageType'],
         args => this.routeLegacyAction('broadcast_message', {
@@ -767,7 +767,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'reference_image_manage',
-        'Unified reference image tool. Actions: add, remove, switch, set_data, query_config, query_current, refresh, set_position, set_scale, set_opacity, list, clear_all.',
+        'Manage scene reference images. Query current/config before modifying position, scale, opacity, or active image. Actions: add, remove, switch, set_data, query_config, query_current, refresh, set_position, set_scale, set_opacity, list, clear_all.',
         ['add', 'remove', 'switch', 'set_data', 'query_config', 'query_current', 'refresh', 'set_position', 'set_scale', 'set_opacity', 'list', 'clear_all'],
         ['paths', 'path', 'sceneUUID', 'key', 'value', 'x', 'y', 'sx', 'sy', 'opacity'],
         args => this.routeLegacyAction('reference_image_manage', {
@@ -787,7 +787,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'validation_params',
-        'Unified validation helper tool. Actions: validate_json, safe_string, format_mcp_request.',
+        'Validate or format MCP parameters before risky calls. Useful when generating JSON arguments programmatically. Actions: validate_json, safe_string, format_mcp_request.',
         ['validate_json', 'safe_string', 'format_mcp_request'],
         ['jsonString', 'expectedSchema', 'value', 'toolName', 'arguments'],
         args => this.routeLegacyAction('validation_params', {
@@ -798,7 +798,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'resource_reference',
-        'Unified resource reference tool. Actions: nodes_by_asset_uuid, asset_dependencies, validate_asset_references.',
+        'Cross-reference assets and scene nodes. Query asset UUID/URL first, then inspect dependent nodes or asset dependencies. Actions: nodes_by_asset_uuid, asset_dependencies, validate_asset_references.',
         ['nodes_by_asset_uuid', 'asset_dependencies', 'validate_asset_references'],
         ['assetUuid', 'urlOrUUID', 'direction', 'directory'],
         args => this.routeLegacyAction('resource_reference', {
@@ -809,7 +809,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'tool_registry',
-        'Unified tool registry helper. Actions: list, describe, actions.',
+        'Inspect available MCP tools and action names when uncertain. Use describe before guessing parameters. Actions: list, describe, actions.',
         ['list', 'describe', 'actions'],
         ['toolName'],
         args => this.handleToolRegistry(args),
@@ -846,7 +846,11 @@ export class UnifiedTools {
   private async routeLegacyAction(toolName: string, actionMap: Record<string, string>, args: any): Promise<ToolResponse> {
     const action = args?.action
     if (!action) {
-      return { success: false, error: `${toolName} requires an action parameter` }
+      return {
+        success: false,
+        error: `${toolName} requires an action parameter`,
+        instruction: `Call tool_registry.actions or inspect tools/list, then retry with one of: ${Object.keys(actionMap).join(', ')}`,
+      }
     }
 
     const target = actionMap[action]
@@ -854,12 +858,86 @@ export class UnifiedTools {
       return {
         success: false,
         error: `Unsupported action '${action}' for ${toolName}. Available actions: ${Object.keys(actionMap).join(', ')}`,
+        instruction: `Retry ${toolName} with action set to one of: ${Object.keys(actionMap).join(', ')}`,
       }
     }
 
     const payload = { ...args }
     delete payload.action
-    return this.callLegacy(target, payload)
+    try {
+      const result = await this.callLegacy(target, payload)
+      return this.withFailureInstruction(result, toolName, action, payload)
+    }
+    catch (error: any) {
+      return this.withFailureInstruction({
+        success: false,
+        error: error?.message ?? String(error),
+      }, toolName, action, payload)
+    }
+  }
+
+  private withFailureInstruction(result: ToolResponse, toolName: string, action: string, args: any): ToolResponse {
+    if (result.success || result.instruction) {
+      return result
+    }
+
+    const instruction = this.getFailureInstruction(toolName, action, result.error || '', args)
+    if (!instruction) {
+      return result
+    }
+
+    return {
+      ...result,
+      instruction,
+    }
+  }
+
+  private getFailureInstruction(toolName: string, action: string, error: string, args: any): string | undefined {
+    const lowerError = error.toLowerCase()
+
+    if (lowerError.includes('requires') && lowerError.includes('uuid')) {
+      return 'Query the target first with node_query or scene_hierarchy, then retry with the returned UUID.'
+    }
+
+    if (lowerError.includes('node') && (lowerError.includes('not found') || lowerError.includes('invalid response') || lowerError.includes('failed to get node'))) {
+      return 'Call node_query.get_all, node_query.find, or scene_hierarchy.get to confirm the node exists and use its exact UUID before retrying.'
+    }
+
+    if (toolName.startsWith('component') || lowerError.includes('component')) {
+      if (lowerError.includes('not found') || lowerError.includes('type') || lowerError.includes('cid') || lowerError.includes('verify')) {
+        return 'Call component_query.get_components with the nodeUuid, then retry using the returned componentType or cid. Use component_available.list only when adding a new component.'
+      }
+      return 'Call component_query.get_components first to confirm the nodeUuid, componentType/cid, and property names before retrying.'
+    }
+
+    if (toolName.startsWith('prefab') || lowerError.includes('prefab') || lowerError.includes('预制体')) {
+      if (action === 'update' || action === 'revert') {
+        return 'Call node_query.get_info for the prefab instance nodeUuid. Use prefab_edit.update to apply overrides to the asset, or prefab_edit.revert to discard instance overrides.'
+      }
+      return 'Use prefab_browse.list/info or asset_query.find_by_name to confirm the prefabPath or assetUuid, then retry with the exact prefab identity.'
+    }
+
+    if (toolName.startsWith('asset') || toolName.startsWith('project_asset') || toolName.startsWith('project_query') || lowerError.includes('asset')) {
+      return 'Use asset_query to convert between filesystem path, asset URL, and UUID. Retry with the exact field expected by this action.'
+    }
+
+    if (lowerError.includes('query-node-tree') || lowerError.includes('query-node') || lowerError.includes('editor.message') || lowerError.includes('message')) {
+      return 'This looks like a Cocos Editor IPC failure. Use debug_console.get or debug_logs.search for details, and avoid guessing unsupported Editor message names.'
+    }
+
+    if (toolName.startsWith('scene')) {
+      return 'Query scene readiness and hierarchy first with scene_execution_control.query_ready and scene_hierarchy.get, then retry the scene operation.'
+    }
+
+    if (toolName.startsWith('node')) {
+      return 'Query the target with node_query or scene_hierarchy, verify the UUID and parent UUID, then retry the node operation.'
+    }
+
+    if (args && (args.url || args.urlOrUUID || args.assetPath || args.assetUuid)) {
+      return 'Verify the asset identity with asset_query before retrying. Asset URL, UUID, and filesystem path are different identifiers.'
+    }
+
+    return `Inspect ${toolName} with tool_registry.describe, verify the required arguments for action '${action}', then retry.`
   }
 
   private async callLegacy(fullName: string, args: any): Promise<ToolResponse> {
@@ -907,6 +985,7 @@ export class UnifiedTools {
         return {
           success: false,
           error: `Unsupported action '${args.action}' for server_control. Available actions: health, settings, available_tools`,
+          instruction: 'Retry server_control with action set to one of: health, settings, available_tools.',
         }
     }
   }
@@ -928,7 +1007,11 @@ export class UnifiedTools {
       case 'describe': {
         const target = tools.find(tool => tool.name === args.toolName)
         if (!target) {
-          return { success: false, error: `Tool ${args.toolName} not found` }
+          return {
+            success: false,
+            error: `Tool ${args.toolName} not found`,
+            instruction: 'Call tool_registry.list to see available tool names, then retry describe with an exact toolName.',
+          }
         }
         return {
           success: true,
@@ -947,6 +1030,7 @@ export class UnifiedTools {
         return {
           success: false,
           error: `Unsupported action '${args.action}' for tool_registry. Available actions: list, describe, actions`,
+          instruction: 'Retry tool_registry with action set to one of: list, describe, actions.',
         }
     }
   }
@@ -956,13 +1040,21 @@ export class UnifiedTools {
     const componentType = args.componentType || 'cc.Button'
 
     if (!nodeUuid) {
-      return { success: false, error: 'component_event_binding requires nodeUuid' }
+      return {
+        success: false,
+        error: 'component_event_binding requires nodeUuid',
+        instruction: 'Call node_query or scene_hierarchy to find the Button node UUID, then retry with nodeUuid.',
+      }
     }
 
     try {
       const componentInfo = await this.getRawComponentInfo(nodeUuid, componentType)
       if (!componentInfo) {
-        return { success: false, error: `Component ${componentType} not found on node ${nodeUuid}` }
+        return {
+          success: false,
+          error: `Component ${componentType} not found on node ${nodeUuid}`,
+          instruction: 'Call component_query.get_components with this nodeUuid to confirm the Button componentType/cid, then retry.',
+        }
       }
 
       const fieldName = this.getButtonEventFieldName(componentInfo.component)
@@ -1026,6 +1118,7 @@ export class UnifiedTools {
           return {
             success: false,
             error: `Unsupported action '${args.action}' for component_event_binding. Available actions: get_button_events, clear_button_events, set_button_events, append_button_event`,
+            instruction: 'Retry component_event_binding with action set to one of: get_button_events, clear_button_events, set_button_events, append_button_event.',
           }
       }
     }
@@ -1033,6 +1126,7 @@ export class UnifiedTools {
       return {
         success: false,
         error: `Failed to process component event binding: ${error.message}`,
+        instruction: 'Confirm nodeUuid, Button componentType/cid, targetNodeUuid, component name, and handler name before retrying.',
       }
     }
   }
