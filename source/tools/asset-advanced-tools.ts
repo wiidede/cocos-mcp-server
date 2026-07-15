@@ -3,6 +3,31 @@ import { Buffer } from 'node:buffer'
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
+import { requestAssetDb, requestEditor } from '../editor-message'
+import { assetManifestToCsv, assetManifestToXml } from './asset-manifest'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+interface BatchImportInput extends ToolArguments {
+  sourceDirectory: string
+  targetDirectory: string
+  fileFilter?: string[]
+  recursive?: boolean
+  overwrite?: boolean
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
 
 export class AssetAdvancedTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -246,32 +271,62 @@ export class AssetAdvancedTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'save_asset_meta':
-        return await this.saveAssetMeta(args.urlOrUUID, args.content)
+        return typeof args.urlOrUUID === 'string' && typeof args.content === 'string'
+          ? this.saveAssetMeta(args.urlOrUUID, args.content)
+          : toolFailure('save_asset_meta requires urlOrUUID and content strings')
       case 'generate_available_url':
-        return await this.generateAvailableUrl(args.url)
+        return typeof args.url === 'string' ? this.generateAvailableUrl(args.url) : toolFailure('generate_available_url requires a url')
       case 'query_asset_db_ready':
-        return await this.queryAssetDbReady()
+        return this.queryAssetDbReady()
       case 'open_asset_external':
-        return await this.openAssetExternal(args.urlOrUUID)
+        return typeof args.urlOrUUID === 'string' ? this.openAssetExternal(args.urlOrUUID) : toolFailure('open_asset_external requires urlOrUUID')
       case 'batch_import_assets':
-        return await this.batchImportAssets(args)
+        return typeof args.sourceDirectory === 'string' && typeof args.targetDirectory === 'string'
+          && (args.fileFilter === undefined || isStringArray(args.fileFilter))
+          && (args.recursive === undefined || typeof args.recursive === 'boolean')
+          && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
+          ? this.batchImportAssets(args as BatchImportInput)
+          : toolFailure('batch_import_assets requires sourceDirectory and targetDirectory strings')
       case 'batch_delete_assets':
-        return await this.batchDeleteAssets(args.urls)
+        return isStringArray(args.urls) ? this.batchDeleteAssets(args.urls) : toolFailure('batch_delete_assets requires a urls string array')
       case 'validate_asset_references':
-        return await this.validateAssetReferences(args.directory)
+        return args.directory === undefined || typeof args.directory === 'string'
+          ? this.validateAssetReferences(args.directory)
+          : toolFailure('validate_asset_references directory must be a string when provided')
       case 'get_asset_dependencies':
-        return await this.getAssetDependencies(args.urlOrUUID, args.direction)
+        return typeof args.urlOrUUID === 'string' && (args.direction === undefined || typeof args.direction === 'string')
+          ? this.getAssetDependencies(args.urlOrUUID, args.direction)
+          : toolFailure('get_asset_dependencies requires urlOrUUID and an optional direction string')
       case 'get_unused_assets':
-        return await this.getUnusedAssets(args.directory, args.excludeDirectories)
+        return (args.directory === undefined || typeof args.directory === 'string')
+          && (args.excludeDirectories === undefined || isStringArray(args.excludeDirectories))
+          ? this.getUnusedAssets(args.directory, args.excludeDirectories)
+          : toolFailure('get_unused_assets accepts optional directory and excludeDirectories string array')
       case 'compress_textures':
-        return await this.compressTextures(args.directory, args.format, args.quality)
+        return (args.directory === undefined || typeof args.directory === 'string')
+          && (args.format === undefined || typeof args.format === 'string')
+          && (args.quality === undefined || typeof args.quality === 'number')
+          ? this.compressTextures(args.directory, args.format, args.quality)
+          : toolFailure('compress_textures accepts optional directory, format, and numeric quality')
       case 'export_asset_manifest':
-        return await this.exportAssetManifest(args.directory, args.format, args.includeMetadata)
+        return (args.directory === undefined || typeof args.directory === 'string')
+          && (args.format === undefined || typeof args.format === 'string')
+          && (args.includeMetadata === undefined || typeof args.includeMetadata === 'boolean')
+          ? this.exportAssetManifest(args.directory, args.format, args.includeMetadata)
+          : toolFailure('export_asset_manifest accepts optional directory, format, and includeMetadata')
       case 'create_default_spriteframe':
-        return await this.createDefaultSpriteframe(args.color, args.size, args.savePath)
+        return (args.color === undefined || typeof args.color === 'string')
+          && (args.size === undefined || typeof args.size === 'number')
+          && (args.savePath === undefined || typeof args.savePath === 'string')
+          ? this.createDefaultSpriteframe(args.color, args.size, args.savePath)
+          : toolFailure('create_default_spriteframe accepts optional color, size, and savePath')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -279,7 +334,7 @@ export class AssetAdvancedTools implements ToolExecutor {
 
   private async saveAssetMeta(urlOrUUID: string, content: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('asset-db', 'save-asset-meta', urlOrUUID, content).then((result: any) => {
+      Editor.Message.request('asset-db', 'save-asset-meta', urlOrUUID, content).then((result) => {
         resolve({
           success: true,
           data: {
@@ -342,7 +397,7 @@ export class AssetAdvancedTools implements ToolExecutor {
     })
   }
 
-  private async batchImportAssets(args: any): Promise<ToolResponse> {
+  private async batchImportAssets(args: BatchImportInput): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
       try {
         if (!fs.existsSync(args.sourceDirectory)) {
@@ -356,7 +411,7 @@ export class AssetAdvancedTools implements ToolExecutor {
           args.recursive || false,
         )
 
-        const importResults: any[] = []
+        const importResults: Record<string, unknown>[] = []
         let successCount = 0
         let errorCount = 0
 
@@ -378,11 +433,11 @@ export class AssetAdvancedTools implements ToolExecutor {
             })
             successCount++
           }
-          catch (err: any) {
+          catch (err: unknown) {
             importResults.push({
               source: filePath,
               success: false,
-              error: err.message,
+              error: getErrorMessage(err),
             })
             errorCount++
           }
@@ -399,8 +454,8 @@ export class AssetAdvancedTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (err: unknown) {
+        resolve({ success: false, error: getErrorMessage(err) })
       }
     })
   }
@@ -430,7 +485,7 @@ export class AssetAdvancedTools implements ToolExecutor {
   private async batchDeleteAssets(urls: string[]): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
       try {
-        const deleteResults: any[] = []
+        const deleteResults: Record<string, unknown>[] = []
         let successCount = 0
         let errorCount = 0
 
@@ -443,11 +498,11 @@ export class AssetAdvancedTools implements ToolExecutor {
             })
             successCount++
           }
-          catch (err: any) {
+          catch (err: unknown) {
             deleteResults.push({
               url,
               success: false,
-              error: err.message,
+              error: getErrorMessage(err),
             })
             errorCount++
           }
@@ -464,8 +519,8 @@ export class AssetAdvancedTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (err: unknown) {
+        resolve({ success: false, error: getErrorMessage(err) })
       }
     })
   }
@@ -476,8 +531,8 @@ export class AssetAdvancedTools implements ToolExecutor {
         // Get all assets in directory
         const assets = await Editor.Message.request('asset-db', 'query-assets', { pattern: `${directory}/**/*` })
 
-        const brokenReferences: any[] = []
-        const validReferences: any[] = []
+        const brokenReferences: Record<string, unknown>[] = []
+        const validReferences: Record<string, unknown>[] = []
 
         for (const asset of assets) {
           try {
@@ -512,8 +567,8 @@ export class AssetAdvancedTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (err: unknown) {
+        resolve({ success: false, error: getErrorMessage(err) })
       }
     })
   }
@@ -553,15 +608,16 @@ export class AssetAdvancedTools implements ToolExecutor {
       try {
         const assets = await Editor.Message.request('asset-db', 'query-assets', { pattern: `${directory}/**/*` })
 
-        const manifest: any[] = []
+        const manifest: Record<string, unknown>[] = []
 
         for (const asset of assets) {
-          const manifestEntry: any = {
+          const assetRecord = asset as unknown as Record<string, unknown>
+          const manifestEntry: Record<string, unknown> = {
             name: asset.name,
             url: asset.url,
             uuid: asset.uuid,
             type: asset.type,
-            size: (asset as any).size || 0,
+            size: typeof assetRecord.size === 'number' ? assetRecord.size : 0,
             isDirectory: asset.isDirectory || false,
           }
 
@@ -586,10 +642,10 @@ export class AssetAdvancedTools implements ToolExecutor {
             exportData = JSON.stringify(manifest, null, 2)
             break
           case 'csv':
-            exportData = this.convertToCSV(manifest)
+            exportData = assetManifestToCsv(manifest)
             break
           case 'xml':
-            exportData = this.convertToXML(manifest)
+            exportData = assetManifestToXml(manifest)
             break
           default:
             exportData = JSON.stringify(manifest, null, 2)
@@ -607,46 +663,10 @@ export class AssetAdvancedTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (err: unknown) {
+        resolve({ success: false, error: getErrorMessage(err) })
       }
     })
-  }
-
-  private convertToCSV(data: any[]): string {
-    if (data.length === 0)
-      return ''
-
-    const headers = Object.keys(data[0])
-    const csvRows = [headers.join(',')]
-
-    for (const row of data) {
-      const values = headers.map((header) => {
-        const value = row[header]
-        return typeof value === 'object' ? JSON.stringify(value) : String(value)
-      })
-      csvRows.push(values.join(','))
-    }
-
-    return csvRows.join('\n')
-  }
-
-  private convertToXML(data: any[]): string {
-    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<assets>\n'
-
-    for (const item of data) {
-      xml += '  <asset>\n'
-      for (const [key, value] of Object.entries(item)) {
-        const xmlValue = typeof value === 'object'
-          ? JSON.stringify(value)
-          : String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        xml += `    <${key}>${xmlValue}</${key}>\n`
-      }
-      xml += '  </asset>\n'
-    }
-
-    xml += '</assets>'
-    return xml
   }
 
   // ====== create_default_spriteframe ======
@@ -753,24 +773,19 @@ export class AssetAdvancedTools implements ToolExecutor {
       const buffer = this.buildSolidPNG(size, r, g, b, a)
       // Resolve project absolute path. Editor.Project.path is the canonical way in Cocos Creator.
       // Fall back to legacy asset-db message if needed.
-      let projectPath: string | undefined
-      try {
-        // Editor is a Cocos global
-        projectPath = (globalThis as any).Editor?.Project?.path
-      }
-      catch { /* ignore */ }
+      let projectPath: string | undefined = Editor.Project.path
       if (!projectPath) {
         try {
-          const info: any = await Editor.Message.request('asset-db', 'query-asset-info', 'db://assets')
-          if (info?.file)
+          const info = await requestAssetDb('query-asset-info', 'db://assets')
+          if (typeof info?.file === 'string')
             projectPath = path.dirname(info.file)
         }
         catch { /* ignore */ }
       }
       if (!projectPath) {
         try {
-          const info: any = await Editor.Message.request('asset-db', 'get-db-info')
-          if (info?.projectPath)
+          const info = await requestEditor('asset-db', 'get-db-info')
+          if (isToolArguments(info) && typeof info.projectPath === 'string')
             projectPath = info.projectPath
         }
         catch { /* ignore */ }
@@ -797,11 +812,11 @@ export class AssetAdvancedTools implements ToolExecutor {
         await Editor.Message.request('asset-db', 'refresh', targetPath)
       }
       // Wait for import (poll up to 5s)
-      let info: any = null
+      let info = await requestAssetDb('query-asset-info', targetPath).catch(() => null)
       for (let i = 0; i < 25; i++) {
         await new Promise(res => setTimeout(res, 200))
         try {
-          info = await Editor.Message.request('asset-db', 'query-asset-info', targetPath)
+          info = await requestAssetDb('query-asset-info', targetPath)
           if (info && info.uuid)
             break
         }
@@ -815,17 +830,17 @@ export class AssetAdvancedTools implements ToolExecutor {
       //   - Array<{ uuid, type, name, ... }> (newer Cocos)
       //   - Object<uuid, { uuid, type, name, ... }> (older Cocos)
       // Normalize to array first.
-      let subAssetArr: any[] = []
+      let subAssetArr: Record<string, unknown>[] = []
       const rawSub = info.subAssets
       if (Array.isArray(rawSub)) {
-        subAssetArr = rawSub
+        subAssetArr = rawSub.filter(isToolArguments)
       }
       else if (rawSub && typeof rawSub === 'object') {
-        subAssetArr = Object.values(rawSub)
+        subAssetArr = Object.values(rawSub).filter(isToolArguments)
       }
-      const spriteFrame = subAssetArr.find(s => s?.type === 'cc.SpriteFrame')
-        || subAssetArr.find(s => /sprite[-_]?frame/i.test(s?.name || ''))
-      if (!spriteFrame || !spriteFrame.uuid) {
+      const spriteFrame = subAssetArr.find(item => item.type === 'cc.SpriteFrame')
+        || subAssetArr.find(item => typeof item.name === 'string' && /sprite[-_]?frame/i.test(item.name))
+      if (!spriteFrame || typeof spriteFrame.uuid !== 'string') {
         const fallbackUuid = `${info.uuid}@f9941`
         return {
           success: true,
@@ -845,14 +860,14 @@ export class AssetAdvancedTools implements ToolExecutor {
           pngUuid: info.uuid,
           spriteFrameUuid: spriteFrame.uuid,
           spriteFrameName: spriteFrame.name,
-            color: { r, g, b, a },
-            size,
-            cached: sameContent,
+          color: { r, g, b, a },
+          size,
+          cached: sameContent,
         },
       }
     }
-    catch (err: any) {
-      return { success: false, error: err?.message ?? String(err) }
+    catch (err: unknown) {
+      return { success: false, error: getErrorMessage(err) }
     }
   }
 }

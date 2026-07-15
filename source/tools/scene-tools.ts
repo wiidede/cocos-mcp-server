@@ -1,4 +1,13 @@
 import type { SceneInfo, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { requestAssetDb, requestEditor, requestScene } from '../editor-message'
+import { buildSceneHierarchy } from './scene-hierarchy'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export class SceneTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -106,24 +115,39 @@ export class SceneTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'get_current_scene':
-        return await this.getCurrentScene()
+        return this.getCurrentScene()
       case 'get_scene_list':
-        return await this.getSceneList()
+        return this.getSceneList()
       case 'open_scene':
-        return await this.openScene(args.scenePath)
+        return typeof args.scenePath === 'string'
+          ? this.openScene(args.scenePath)
+          : toolFailure('open_scene requires a scenePath string')
       case 'save_scene':
-        return await this.saveScene()
+        return this.saveScene()
       case 'create_scene':
-        return await this.createScene(args.sceneName, args.savePath, args)
+        return (args.sceneName === undefined || typeof args.sceneName === 'string')
+          && (args.savePath === undefined || typeof args.savePath === 'string')
+          && (args.path === undefined || typeof args.path === 'string')
+          && (args.autoCreateCanvas === undefined || typeof args.autoCreateCanvas === 'boolean')
+          ? this.createScene(args.sceneName, args.savePath, args)
+          : toolFailure('create_scene accepts optional sceneName, savePath/path strings, and autoCreateCanvas boolean')
       case 'save_scene_as':
-        return await this.saveSceneAs(args.path)
+        return typeof args.path === 'string'
+          ? this.saveSceneAs(args.path)
+          : toolFailure('save_scene_as requires a path string')
       case 'close_scene':
-        return await this.closeScene()
+        return this.closeScene()
       case 'get_scene_hierarchy':
-        return await this.getSceneHierarchy(args.includeComponents)
+        return args.includeComponents === undefined || typeof args.includeComponents === 'boolean'
+          ? this.getSceneHierarchy(args.includeComponents)
+          : toolFailure('get_scene_hierarchy includeComponents must be a boolean when provided')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -132,7 +156,7 @@ export class SceneTools implements ToolExecutor {
   private async getCurrentScene(): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 直接使用 query-node-tree 来获取场景信息（这个方法已经验证可用）
-      Editor.Message.request('scene', 'query-node-tree').then((tree: any) => {
+      requestScene('query-node-tree').then((tree) => {
         if (tree && tree.uuid) {
           resolve({
             success: true,
@@ -156,7 +180,7 @@ export class SceneTools implements ToolExecutor {
           args: [],
         }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
+        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
           resolve(result)
         }).catch((err2: Error) => {
           resolve({ success: false, error: `Direct API failed: ${err.message}, Scene script failed: ${err2.message}` })
@@ -168,9 +192,9 @@ export class SceneTools implements ToolExecutor {
   private async getSceneList(): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // Note: query-assets API corrected with proper parameters
-      Editor.Message.request('asset-db', 'query-assets', {
+      requestAssetDb('query-assets', {
         pattern: 'db://assets/**/*.scene',
-      }).then((results: any[]) => {
+      }).then((results) => {
         const scenes: SceneInfo[] = results.map(asset => ({
           name: asset.name,
           path: asset.url,
@@ -186,7 +210,7 @@ export class SceneTools implements ToolExecutor {
   private async openScene(scenePath: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 首先获取场景的UUID
-      Editor.Message.request('asset-db', 'query-uuid', scenePath).then((uuid: string | null) => {
+      requestAssetDb('query-uuid', scenePath).then((uuid) => {
         if (!uuid) {
           throw new Error('Scene not found')
         }
@@ -211,10 +235,10 @@ export class SceneTools implements ToolExecutor {
     })
   }
 
-  private async createScene(sceneName?: string, savePath?: string, extraArgs: any = {}): Promise<ToolResponse> {
+  private async createScene(sceneName?: string, savePath?: string, extraArgs: ToolArguments = {}): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 兼容 path / savePath 两种参数，并允许从 savePath 推断 sceneName
-      const rawPath = (extraArgs.path || savePath || '') as string
+      const rawPath = typeof extraArgs.path === 'string' ? extraArgs.path : savePath || ''
       if (!rawPath) {
         resolve({
           success: false,
@@ -387,10 +411,14 @@ export class SceneTools implements ToolExecutor {
         },
       ], null, 2)
 
-      Editor.Message.request('asset-db', 'create-asset', fullPath, sceneContent).then((result: any) => {
-        const finalize = (canvasInfo: any = null) => {
+      Editor.Message.request('asset-db', 'create-asset', fullPath, sceneContent).then((result) => {
+        if (!result) {
+          resolve({ success: false, error: 'Scene creation returned no asset information' })
+          return
+        }
+        const finalize = (canvasInfo: unknown = null) => {
           this.getSceneList().then((sceneList) => {
-            const createdScene = sceneList.data?.find((scene: any) => scene.uuid === result.uuid)
+            const createdScene = sceneList.data?.find((scene: unknown) => isToolArguments(scene) && scene.uuid === result.uuid)
             resolve({
               success: true,
               data: {
@@ -434,7 +462,7 @@ export class SceneTools implements ToolExecutor {
     })
   }
 
-  private async bootstrapCanvasInScene(sceneUuid: string): Promise<any> {
+  private async bootstrapCanvasInScene(sceneUuid: string): Promise<Record<string, unknown>> {
     // 1) 打开新建的场景
     await new Promise<void>((resolve, reject) => {
       Editor.Message.request('scene', 'open-scene', sceneUuid)
@@ -460,13 +488,13 @@ export class SceneTools implements ToolExecutor {
     })
 
     // 3) 拿场景根节点
-    const tree: any = await Editor.Message.request('scene', 'query-node-tree')
+    const tree = await requestScene('query-node-tree')
     if (!tree || !tree.uuid) {
       throw new Error('Failed to query scene root node after open')
     }
 
     // 4) 创建 2DNode "Canvas" 作为根节点的子节点（2DNode 类型自带 cc.UITransform）
-    const createResult: any = await Editor.Message.request('scene', 'create-node', {
+    const createResult = await Editor.Message.request('scene', 'create-node', {
       name: 'Canvas',
       parent: tree.uuid,
       type: '2DNode',
@@ -483,9 +511,9 @@ export class SceneTools implements ToolExecutor {
         component: 'cc.Canvas',
       })
     }
-    catch (canvasErr: any) {
+    catch (canvasErr: unknown) {
       // 若 Canvas 已存在则忽略
-      const msg = String(canvasErr?.message || canvasErr)
+      const msg = canvasErr instanceof Error ? canvasErr.message : String(canvasErr)
       if (!/already exists/i.test(msg)) {
         throw canvasErr
       }
@@ -500,9 +528,9 @@ export class SceneTools implements ToolExecutor {
   private async getSceneHierarchy(includeComponents: boolean = false): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 优先尝试使用 Editor API 查询场景节点树
-      Editor.Message.request('scene', 'query-node-tree').then((tree: any) => {
+      requestScene('query-node-tree').then((tree) => {
         if (tree) {
-          const hierarchy = this.buildHierarchy(tree, includeComponents)
+          const hierarchy = buildSceneHierarchy(tree, includeComponents)
           resolve({
             success: true,
             data: hierarchy,
@@ -519,7 +547,7 @@ export class SceneTools implements ToolExecutor {
           args: [includeComponents],
         }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
+        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
           resolve(result)
         }).catch((err2: Error) => {
           resolve({ success: false, error: `Direct API failed: ${err.message}, Scene script failed: ${err2.message}` })
@@ -528,35 +556,10 @@ export class SceneTools implements ToolExecutor {
     })
   }
 
-  private buildHierarchy(node: any, includeComponents: boolean): any {
-    const nodeInfo: any = {
-      uuid: node.uuid,
-      name: node.name,
-      type: node.type,
-      active: node.active,
-      children: [],
-    }
-
-    if (includeComponents && node.__comps__) {
-      nodeInfo.components = node.__comps__.map((comp: any) => ({
-        type: comp.__type__ || 'Unknown',
-        enabled: comp.enabled !== undefined ? comp.enabled : true,
-      }))
-    }
-
-    if (node.children) {
-      nodeInfo.children = node.children.map((child: any) =>
-        this.buildHierarchy(child, includeComponents),
-      )
-    }
-
-    return nodeInfo
-  }
-
   private async saveSceneAs(path: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // save-as-scene API 不接受路径参数，会弹出对话框让用户选择
-      (Editor.Message.request as any)('scene', 'save-as-scene').then(() => {
+      requestEditor('scene', 'save-as-scene').then(() => {
         resolve({
           success: true,
           data: {

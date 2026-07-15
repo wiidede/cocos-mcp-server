@@ -1,7 +1,29 @@
+import type { SceneNodeDump } from '../editor-message'
 import type { ConsoleMessage, PerformanceStats, ToolDefinition, ToolExecutor, ToolResponse, ValidationIssue, ValidationResult } from '../types'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import process from 'node:process'
+import { requestScene } from '../editor-message'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+interface DebugTreeNode {
+  uuid?: string
+  name?: string
+  active?: boolean
+  components: string[]
+  childCount: number
+  children: Array<DebugTreeNode | { truncated: true }>
+}
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 export class DebugTools implements ToolExecutor {
   private consoleMessages: ConsoleMessage[] = []
@@ -18,7 +40,7 @@ export class DebugTools implements ToolExecutor {
     console.log('Console capture setup - implementation depends on Editor API availability')
   }
 
-  private addConsoleMessage(message: any): void {
+  private addConsoleMessage(message: Omit<ConsoleMessage, 'timestamp'>): void {
     this.consoleMessages.push({
       timestamp: new Date().toISOString(),
       ...message,
@@ -187,28 +209,47 @@ export class DebugTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'get_console_logs':
-        return await this.getConsoleLogs(args.limit, args.filter)
+        return (args.limit === undefined || typeof args.limit === 'number') && (args.filter === undefined || typeof args.filter === 'string')
+          ? this.getConsoleLogs(args.limit, args.filter)
+          : toolFailure('get_console_logs accepts optional numeric limit and string filter')
       case 'clear_console':
-        return await this.clearConsole()
+        return this.clearConsole()
       case 'execute_script':
-        return await this.executeScript(args.script)
+        return typeof args.script === 'string' ? this.executeScript(args.script) : toolFailure('execute_script requires a script string')
       case 'get_node_tree':
-        return await this.getNodeTree(args.rootUuid, args.maxDepth)
+        return (args.rootUuid === undefined || typeof args.rootUuid === 'string') && (args.maxDepth === undefined || typeof args.maxDepth === 'number')
+          ? this.getNodeTree(args.rootUuid, args.maxDepth)
+          : toolFailure('get_node_tree accepts optional rootUuid and numeric maxDepth')
       case 'get_performance_stats':
-        return await this.getPerformanceStats()
+        return this.getPerformanceStats()
       case 'validate_scene':
-        return await this.validateScene(args)
+        return (args.checkMissingAssets === undefined || typeof args.checkMissingAssets === 'boolean')
+          && (args.checkPerformance === undefined || typeof args.checkPerformance === 'boolean')
+          ? this.validateScene(args)
+          : toolFailure('validate_scene check flags must be booleans when provided')
       case 'get_editor_info':
-        return await this.getEditorInfo()
+        return this.getEditorInfo()
       case 'get_project_logs':
-        return await this.getProjectLogs(args.lines, args.filterKeyword, args.logLevel)
+        return (args.lines === undefined || typeof args.lines === 'number')
+          && (args.filterKeyword === undefined || typeof args.filterKeyword === 'string')
+          && (args.logLevel === undefined || typeof args.logLevel === 'string')
+          ? this.getProjectLogs(args.lines, args.filterKeyword, args.logLevel)
+          : toolFailure('get_project_logs accepts optional lines, filterKeyword, and logLevel')
       case 'get_log_file_info':
-        return await this.getLogFileInfo()
+        return this.getLogFileInfo()
       case 'search_project_logs':
-        return await this.searchProjectLogs(args.pattern, args.maxResults, args.contextLines)
+        return typeof args.pattern === 'string'
+          && (args.maxResults === undefined || typeof args.maxResults === 'number')
+          && (args.contextLines === undefined || typeof args.contextLines === 'number')
+          ? this.searchProjectLogs(args.pattern, args.maxResults, args.contextLines)
+          : toolFailure('search_project_logs requires pattern and optional numeric limits')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -244,8 +285,8 @@ export class DebugTools implements ToolExecutor {
         message: 'Console cleared successfully',
       }
     }
-    catch (err: any) {
-      return { success: false, error: err.message }
+    catch (err: unknown) {
+      return { success: false, error: getErrorMessage(err) }
     }
   }
 
@@ -255,7 +296,7 @@ export class DebugTools implements ToolExecutor {
         name: 'console',
         method: 'eval',
         args: [script],
-      }).then((result: any) => {
+      }).then((result) => {
         resolve({
           success: true,
           data: {
@@ -271,8 +312,8 @@ export class DebugTools implements ToolExecutor {
 
   private async getNodeTree(rootUuid?: string, maxDepth: number = 10): Promise<ToolResponse> {
     try {
-      const sceneTree = await Editor.Message.request('scene', 'query-node-tree')
-      const findNode = (node: any): any => {
+      const sceneTree = await requestScene('query-node-tree')
+      const findNode = (node: SceneNodeDump): SceneNodeDump | null => {
         if (node.uuid === rootUuid) {
           return node
         }
@@ -284,15 +325,15 @@ export class DebugTools implements ToolExecutor {
         }
         return null
       }
-      const buildTree = (node: any, depth: number = 0): any => {
+      const buildTree = (node: SceneNodeDump, depth: number = 0): DebugTreeNode => {
         const children = node.children || []
-        const tree = {
+        const tree: DebugTreeNode = {
           uuid: node.uuid,
           name: node.name,
           active: node.active,
-          components: (node.__comps__ || []).map((component: any) => component.__type__ || component.type || 'Unknown'),
+          components: (node.__comps__ || []).map(component => component.__type__ || component.type || 'Unknown'),
           childCount: children.length,
-          children: [] as any[],
+          children: [],
         }
         if (depth >= maxDepth) {
           if (children.length > 0) {
@@ -300,7 +341,7 @@ export class DebugTools implements ToolExecutor {
           }
           return tree
         }
-        tree.children = children.map((child: any) => buildTree(child, depth + 1))
+        tree.children = children.map(child => buildTree(child, depth + 1))
         return tree
       }
 
@@ -310,14 +351,14 @@ export class DebugTools implements ToolExecutor {
       }
       return { success: true, data: buildTree(root) }
     }
-    catch (err: any) {
-      return { success: false, error: err.message }
+    catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   }
 
   private async getPerformanceStats(): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('scene', 'query-performance').then((stats: any) => {
+      Editor.Message.request('scene', 'query-performance').then((stats) => {
         const perfStats: PerformanceStats = {
           nodeCount: stats.nodeCount || 0,
           componentCount: stats.componentCount || 0,
@@ -338,13 +379,13 @@ export class DebugTools implements ToolExecutor {
     })
   }
 
-  private async validateScene(options: any): Promise<ToolResponse> {
+  private async validateScene(options: ToolArguments): Promise<ToolResponse> {
     const issues: ValidationIssue[] = []
 
     try {
       // Check for performance issues
       if (options.checkPerformance) {
-        const hierarchy = await Editor.Message.request('scene', 'query-node-tree')
+        const hierarchy = await requestScene('query-node-tree')
         const nodeCount = this.countNodes([hierarchy])
 
         if (nodeCount > 1000) {
@@ -365,12 +406,12 @@ export class DebugTools implements ToolExecutor {
 
       return { success: true, data: result }
     }
-    catch (err: any) {
-      return { success: false, error: err.message }
+    catch (err: unknown) {
+      return { success: false, error: getErrorMessage(err) }
     }
   }
 
-  private countNodes(nodes: any[]): number {
+  private countNodes(nodes: SceneNodeDump[]): number {
     let count = nodes.length
     for (const node of nodes) {
       if (node.children) {
@@ -381,10 +422,11 @@ export class DebugTools implements ToolExecutor {
   }
 
   private async getEditorInfo(): Promise<ToolResponse> {
+    const versions = (Editor as unknown as { versions?: Record<string, unknown> }).versions
     const info = {
       editor: {
-        version: (Editor as any).versions?.editor || 'Unknown',
-        cocosVersion: (Editor as any).versions?.cocos || 'Unknown',
+        version: typeof versions?.editor === 'string' ? versions.editor : 'Unknown',
+        cocosVersion: typeof versions?.cocos === 'string' ? versions.cocos : 'Unknown',
         platform: process.platform,
         arch: process.arch,
         nodeVersion: process.version,
@@ -407,7 +449,6 @@ export class DebugTools implements ToolExecutor {
       let logFilePath = ''
       const possiblePaths = [
         Editor.Project ? Editor.Project.path : null,
-        '/Users/lizhiyong/NewProject_3',
         process.cwd(),
       ].filter(p => p !== null)
 
@@ -463,10 +504,10 @@ export class DebugTools implements ToolExecutor {
         },
       }
     }
-    catch (error: any) {
+    catch (error: unknown) {
       return {
         success: false,
-        error: `Failed to read project logs: ${error.message}`,
+        error: `Failed to read project logs: ${getErrorMessage(error)}`,
       }
     }
   }
@@ -477,7 +518,6 @@ export class DebugTools implements ToolExecutor {
       let logFilePath = ''
       const possiblePaths = [
         Editor.Project ? Editor.Project.path : null,
-        '/Users/lizhiyong/NewProject_3',
         process.cwd(),
       ].filter(p => p !== null)
 
@@ -513,10 +553,10 @@ export class DebugTools implements ToolExecutor {
         },
       }
     }
-    catch (error: any) {
+    catch (error: unknown) {
       return {
         success: false,
-        error: `Failed to get log file info: ${error.message}`,
+        error: `Failed to get log file info: ${getErrorMessage(error)}`,
       }
     }
   }
@@ -527,7 +567,6 @@ export class DebugTools implements ToolExecutor {
       let logFilePath = ''
       const possiblePaths = [
         Editor.Project ? Editor.Project.path : null,
-        '/Users/lizhiyong/NewProject_3',
         process.cwd(),
       ].filter(p => p !== null)
 
@@ -559,7 +598,7 @@ export class DebugTools implements ToolExecutor {
         regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
       }
 
-      const matches: any[] = []
+      const matches: Record<string, unknown>[] = []
       let resultCount = 0
 
       for (let i = 0; i < logLines.length && resultCount < maxResults; i++) {
@@ -603,10 +642,10 @@ export class DebugTools implements ToolExecutor {
         },
       }
     }
-    catch (error: any) {
+    catch (error: unknown) {
       return {
         success: false,
-        error: `Failed to search project logs: ${error.message}`,
+        error: `Failed to search project logs: ${getErrorMessage(error)}`,
       }
     }
   }

@@ -1,4 +1,16 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { requestEditor, requestScene } from '../editor-message'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringOrStringArray(value: unknown): value is string | string[] {
+  return typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'))
+}
 
 export class SceneAdvancedTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -363,56 +375,86 @@ export class SceneAdvancedTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'reset_node_property':
-        return await this.resetNodeProperty(args.uuid, args.path)
+        return typeof args.uuid === 'string' && typeof args.path === 'string'
+          ? this.resetNodeProperty(args.uuid, args.path)
+          : toolFailure('reset_node_property requires uuid and path strings')
       case 'move_array_element':
-        return await this.moveArrayElement(args.uuid, args.path, args.target, args.offset)
+        return typeof args.uuid === 'string' && typeof args.path === 'string' && typeof args.target === 'number' && typeof args.offset === 'number'
+          ? this.moveArrayElement(args.uuid, args.path, args.target, args.offset)
+          : toolFailure('move_array_element requires uuid, path, target, and offset')
       case 'remove_array_element':
-        return await this.removeArrayElement(args.uuid, args.path, args.index)
+        return typeof args.uuid === 'string' && typeof args.path === 'string' && typeof args.index === 'number'
+          ? this.removeArrayElement(args.uuid, args.path, args.index)
+          : toolFailure('remove_array_element requires uuid, path, and index')
       case 'copy_node':
-        return await this.copyNode(args.uuids)
+        return isStringOrStringArray(args.uuids)
+          ? this.copyNode(args.uuids)
+          : toolFailure('copy_node requires a UUID string or string array')
       case 'paste_node':
-        return await this.pasteNode(args.target, args.uuids, args.keepWorldTransform)
+        return typeof args.target === 'string'
+          && isStringOrStringArray(args.uuids)
+          && (args.keepWorldTransform === undefined || typeof args.keepWorldTransform === 'boolean')
+          ? this.pasteNode(args.target, args.uuids, args.keepWorldTransform)
+          : toolFailure('paste_node requires target, uuids, and an optional keepWorldTransform boolean')
       case 'cut_node':
-        return await this.cutNode(args.uuids)
+        return isStringOrStringArray(args.uuids)
+          ? this.cutNode(args.uuids)
+          : toolFailure('cut_node requires a UUID string or string array')
       case 'reset_node_transform':
-        return await this.resetNodeTransform(args.uuid)
+        return typeof args.uuid === 'string' ? this.resetNodeTransform(args.uuid) : toolFailure('reset_node_transform requires a uuid')
       case 'reset_component':
-        return await this.resetComponent(args.uuid)
+        return typeof args.uuid === 'string' ? this.resetComponent(args.uuid) : toolFailure('reset_component requires a uuid')
       case 'restore_prefab':
-        return await this.restorePrefab(args.nodeUuid, args.assetUuid)
+        return typeof args.nodeUuid === 'string' && typeof args.assetUuid === 'string'
+          ? this.restorePrefab(args.nodeUuid, args.assetUuid)
+          : toolFailure('restore_prefab requires nodeUuid and assetUuid')
       case 'execute_component_method':
-        return await this.executeComponentMethod(args.uuid, args.name, args.args)
+        return typeof args.uuid === 'string' && typeof args.name === 'string' && (args.args === undefined || Array.isArray(args.args))
+          ? this.executeComponentMethod(args.uuid, args.name, args.args)
+          : toolFailure('execute_component_method requires uuid, name, and an optional args array')
       case 'execute_scene_script':
-        return await this.executeSceneScript(args.name, args.method, args.args)
+        return typeof args.name === 'string' && typeof args.method === 'string' && (args.args === undefined || Array.isArray(args.args))
+          ? this.executeSceneScript(args.name, args.method, args.args)
+          : toolFailure('execute_scene_script requires name, method, and an optional args array')
       case 'scene_snapshot':
-        return await this.sceneSnapshot()
+        return this.sceneSnapshot()
       case 'scene_snapshot_abort':
-        return await this.sceneSnapshotAbort()
+        return this.sceneSnapshotAbort()
       case 'begin_undo_recording':
-        return await this.beginUndoRecording(args.nodeUuid)
+        return typeof args.nodeUuid === 'string' ? this.beginUndoRecording(args.nodeUuid) : toolFailure('begin_undo_recording requires nodeUuid')
       case 'end_undo_recording':
-        return await this.endUndoRecording(args.undoId)
+        return typeof args.undoId === 'string' ? this.endUndoRecording(args.undoId) : toolFailure('end_undo_recording requires undoId')
       case 'cancel_undo_recording':
-        return await this.cancelUndoRecording(args.undoId)
+        return typeof args.undoId === 'string' ? this.cancelUndoRecording(args.undoId) : toolFailure('cancel_undo_recording requires undoId')
       case 'soft_reload_scene':
-        return await this.softReloadScene()
+        return this.softReloadScene()
       case 'query_scene_ready':
-        return await this.querySceneReady()
+        return this.querySceneReady()
       case 'query_scene_dirty':
-        return await this.querySceneDirty()
+        return this.querySceneDirty()
       case 'query_scene_classes':
-        return await this.querySceneClasses(args.extends)
+        return args.extends === undefined || typeof args.extends === 'string'
+          ? this.querySceneClasses(args.extends)
+          : toolFailure('query_scene_classes extends must be a string when provided')
       case 'query_scene_components':
-        return await this.querySceneComponents()
+        return this.querySceneComponents()
       case 'query_component_has_script':
-        return await this.queryComponentHasScript(args.className)
+        return typeof args.className === 'string'
+          ? this.queryComponentHasScript(args.className)
+          : toolFailure('query_component_has_script requires className')
       case 'query_nodes_by_asset_uuid':
-        return await this.queryNodesByAssetUuid(args.assetUuid)
+        return typeof args.assetUuid === 'string'
+          ? this.queryNodesByAssetUuid(args.assetUuid)
+          : toolFailure('query_nodes_by_asset_uuid requires assetUuid')
       case 'query_scene_info':
-        return await this.querySceneInfo()
+        return this.querySceneInfo()
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -508,7 +550,7 @@ export class SceneAdvancedTools implements ToolExecutor {
 
   private async cutNode(uuids: string | string[]): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('scene', 'cut-node', uuids).then((result: any) => {
+      Editor.Message.request('scene', 'cut-node', uuids).then((result) => {
         resolve({
           success: true,
           data: {
@@ -550,7 +592,7 @@ export class SceneAdvancedTools implements ToolExecutor {
 
   private async restorePrefab(nodeUuid: string, assetUuid: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      (Editor.Message.request as any)('scene', 'restore-prefab', nodeUuid, assetUuid).then(() => {
+      requestEditor('scene', 'restore-prefab', nodeUuid, assetUuid).then(() => {
         resolve({
           success: true,
           message: 'Prefab restored successfully',
@@ -561,13 +603,13 @@ export class SceneAdvancedTools implements ToolExecutor {
     })
   }
 
-  private async executeComponentMethod(uuid: string, name: string, args: any[] = []): Promise<ToolResponse> {
+  private async executeComponentMethod(uuid: string, name: string, args: unknown[] = []): Promise<ToolResponse> {
     return new Promise((resolve) => {
       Editor.Message.request('scene', 'execute-component-method', {
         uuid,
         name,
         args,
-      }).then((result: any) => {
+      }).then((result) => {
         resolve({
           success: true,
           data: {
@@ -581,13 +623,13 @@ export class SceneAdvancedTools implements ToolExecutor {
     })
   }
 
-  private async executeSceneScript(name: string, method: string, args: any[] = []): Promise<ToolResponse> {
+  private async executeSceneScript(name: string, method: string, args: unknown[] = []): Promise<ToolResponse> {
     return new Promise((resolve) => {
       Editor.Message.request('scene', 'execute-scene-script', {
         name,
         method,
         args,
-      }).then((result: any) => {
+      }).then((result) => {
         resolve({
           success: true,
           data: result,
@@ -713,12 +755,12 @@ export class SceneAdvancedTools implements ToolExecutor {
 
   private async querySceneClasses(extendsClass?: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      const options: any = {}
+      const options: { extends?: string } = {}
       if (extendsClass) {
         options.extends = extendsClass
       }
 
-      Editor.Message.request('scene', 'query-classes', options).then((classes: any[]) => {
+      Editor.Message.request('scene', 'query-classes', options).then((classes) => {
         resolve({
           success: true,
           data: {
@@ -735,7 +777,7 @@ export class SceneAdvancedTools implements ToolExecutor {
 
   private async querySceneComponents(): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('scene', 'query-components').then((components: any[]) => {
+      Editor.Message.request('scene', 'query-components').then((components) => {
         resolve({
           success: true,
           data: {
@@ -787,30 +829,30 @@ export class SceneAdvancedTools implements ToolExecutor {
   private async querySceneInfo(): Promise<ToolResponse> {
     // 聚合多个独立 API 一次性返回场景状态，避免外部多次组合
     const [tree, ready, dirty, currentScene] = await Promise.all([
-      Editor.Message.request('scene', 'query-node-tree').catch(() => null),
-      Editor.Message.request('scene', 'query-is-ready').catch(() => null),
-      Editor.Message.request('scene', 'query-dirty').catch(() => null),
-      Editor.Message.request('scene', 'query-current-scene').catch(() => null),
+      requestScene('query-node-tree').catch(() => null),
+      requestScene('query-is-ready').catch(() => null),
+      requestScene('query-dirty').catch(() => null),
+      requestScene('query-current-scene').catch(() => null),
     ])
 
     if (!tree) {
       return { success: false, error: 'No scene data available' }
     }
 
-    const childCount = Array.isArray((tree as any).children) ? (tree as any).children.length : 0
+    const childCount = Array.isArray(tree.children) ? tree.children.length : 0
 
     return {
       success: true,
       data: {
-        name: (tree as any).name || 'Current Scene',
-        uuid: (tree as any).uuid,
-        type: (tree as any).type || 'cc.Scene',
-        active: (tree as any).active !== undefined ? (tree as any).active : true,
+        name: tree.name || 'Current Scene',
+        uuid: tree.uuid,
+        type: tree.type || 'cc.Scene',
+        active: tree.active !== undefined ? tree.active : true,
         childCount,
         ready: ready === true,
         dirty: dirty === true,
-        assetUrl: (currentScene as any)?.url ?? null,
-        sceneAssetUuid: (currentScene as any)?.uuid ?? null,
+        assetUrl: currentScene?.url ?? null,
+        sceneAssetUuid: currentScene?.uuid ?? null,
       },
     }
   }

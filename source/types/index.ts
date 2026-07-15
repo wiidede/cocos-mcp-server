@@ -1,3 +1,22 @@
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
+
+export interface JsonObject {
+  [key: string]: JsonValue
+}
+
+export interface JsonSchema {
+  type?: string
+  description?: string
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+  items?: JsonSchema
+  enum?: JsonValue[]
+  oneOf?: JsonSchema[]
+  default?: JsonValue
+  [key: string]: unknown
+}
+
 export interface MCPServerSettings {
   port: number
   autoStart: boolean
@@ -15,7 +34,7 @@ export interface ServerStatus {
 export interface ToolDefinition {
   name: string
   description: string
-  inputSchema: any
+  inputSchema: JsonSchema
 }
 
 export interface ToolResponse {
@@ -46,7 +65,7 @@ export interface NodeInfo {
 export interface ComponentInfo {
   type: string
   enabled: boolean
-  properties?: Record<string, any>
+  properties?: Record<string, unknown>
 }
 
 export interface SceneInfo {
@@ -98,14 +117,14 @@ export interface PerformanceStats {
   componentCount: number
   drawCalls: number
   triangles: number
-  memory: Record<string, any>
+  memory: Record<string, unknown>
 }
 
 export interface ValidationIssue {
   type: 'error' | 'warning' | 'info'
   category: string
   message: string
-  details?: any
+  details?: unknown
   suggestion?: string
 }
 
@@ -123,7 +142,7 @@ export interface MCPClient {
 
 export interface ToolExecutor {
   getTools: () => ToolDefinition[]
-  execute: (toolName: string, args: any) => Promise<ToolResponse>
+  execute: (toolName: string, args: unknown) => Promise<ToolResponse>
 }
 
 // 工具配置管理相关接口

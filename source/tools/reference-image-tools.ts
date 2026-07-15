@@ -1,4 +1,19 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 export class ReferenceImageTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -167,32 +182,50 @@ export class ReferenceImageTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'add_reference_image':
-        return await this.addReferenceImage(args.paths)
+        return isStringArray(args.paths)
+          ? this.addReferenceImage(args.paths)
+          : toolFailure('add_reference_image requires a paths string array')
       case 'remove_reference_image':
-        return await this.removeReferenceImage(args.paths)
+        return args.paths === undefined || isStringArray(args.paths)
+          ? this.removeReferenceImage(args.paths)
+          : toolFailure('remove_reference_image paths must be a string array when provided')
       case 'switch_reference_image':
-        return await this.switchReferenceImage(args.path, args.sceneUUID)
+        return typeof args.path === 'string' && (args.sceneUUID === undefined || typeof args.sceneUUID === 'string')
+          ? this.switchReferenceImage(args.path, args.sceneUUID)
+          : toolFailure('switch_reference_image requires a path and an optional sceneUUID string')
       case 'set_reference_image_data':
-        return await this.setReferenceImageData(args.key, args.value)
+        return typeof args.key === 'string' && Object.hasOwn(args, 'value')
+          ? this.setReferenceImageData(args.key, args.value)
+          : toolFailure('set_reference_image_data requires a key and value')
       case 'query_reference_image_config':
-        return await this.queryReferenceImageConfig()
+        return this.queryReferenceImageConfig()
       case 'query_current_reference_image':
-        return await this.queryCurrentReferenceImage()
+        return this.queryCurrentReferenceImage()
       case 'refresh_reference_image':
-        return await this.refreshReferenceImage()
+        return this.refreshReferenceImage()
       case 'set_reference_image_position':
-        return await this.setReferenceImagePosition(args.x, args.y)
+        return typeof args.x === 'number' && typeof args.y === 'number'
+          ? this.setReferenceImagePosition(args.x, args.y)
+          : toolFailure('set_reference_image_position requires numeric x and y values')
       case 'set_reference_image_scale':
-        return await this.setReferenceImageScale(args.sx, args.sy)
+        return typeof args.sx === 'number' && typeof args.sy === 'number'
+          ? this.setReferenceImageScale(args.sx, args.sy)
+          : toolFailure('set_reference_image_scale requires numeric sx and sy values')
       case 'set_reference_image_opacity':
-        return await this.setReferenceImageOpacity(args.opacity)
+        return typeof args.opacity === 'number'
+          ? this.setReferenceImageOpacity(args.opacity)
+          : toolFailure('set_reference_image_opacity requires a numeric opacity value')
       case 'list_reference_images':
-        return await this.listReferenceImages()
+        return this.listReferenceImages()
       case 'clear_all_reference_images':
-        return await this.clearAllReferenceImages()
+        return this.clearAllReferenceImages()
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -249,7 +282,7 @@ export class ReferenceImageTools implements ToolExecutor {
     })
   }
 
-  private async setReferenceImageData(key: string, value: any): Promise<ToolResponse> {
+  private async setReferenceImageData(key: string, value: unknown): Promise<ToolResponse> {
     return new Promise((resolve) => {
       Editor.Message.request('reference-image', 'set-image-data', key, value).then(() => {
         resolve({
@@ -268,7 +301,7 @@ export class ReferenceImageTools implements ToolExecutor {
 
   private async queryReferenceImageConfig(): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('reference-image', 'query-config').then((config: any) => {
+      Editor.Message.request('reference-image', 'query-config').then((config: unknown) => {
         resolve({
           success: true,
           data: config,
@@ -281,7 +314,7 @@ export class ReferenceImageTools implements ToolExecutor {
 
   private async queryCurrentReferenceImage(): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('reference-image', 'query-current').then((current: any) => {
+      Editor.Message.request('reference-image', 'query-current').then((current: unknown) => {
         resolve({
           success: true,
           data: current,
@@ -320,8 +353,8 @@ export class ReferenceImageTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (error: unknown) {
+        resolve({ success: false, error: getErrorMessage(error) })
       }
     })
   }
@@ -341,8 +374,8 @@ export class ReferenceImageTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (error: unknown) {
+        resolve({ success: false, error: getErrorMessage(error) })
       }
     })
   }
@@ -378,8 +411,8 @@ export class ReferenceImageTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (error: unknown) {
+        resolve({ success: false, error: getErrorMessage(error) })
       }
     })
   }
@@ -395,8 +428,8 @@ export class ReferenceImageTools implements ToolExecutor {
           message: 'All reference images cleared',
         })
       }
-      catch (err: any) {
-        resolve({ success: false, error: err.message })
+      catch (error: unknown) {
+        resolve({ success: false, error: getErrorMessage(error) })
       }
     })
   }

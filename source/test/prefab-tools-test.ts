@@ -1,3 +1,5 @@
+import { generateUuid } from '../tools/prefab-format'
+import { createEngineNode } from '../tools/prefab-node'
 import { PrefabTools } from '../tools/prefab-tools'
 
 // 预制体工具测试
@@ -187,8 +189,11 @@ export class PrefabToolsTest {
       ],
     }
 
-    const prefabUuid = this.prefabTools.generateUUID()
-    const prefabData = this.prefabTools.createPrefabData(mockNodeData, 'TestPrefab', prefabUuid)
+    const prefabUuid = generateUuid()
+    const prefabData = [
+      { __type__: 'cc.Prefab', _name: 'TestPrefab', uuid: prefabUuid },
+      createEngineNode(mockNodeData, null, 'TestPrefab'),
+    ]
 
     console.log('生成的预制体数据结构:')
     console.log(JSON.stringify(prefabData, null, 2))
@@ -206,7 +211,7 @@ export class PrefabToolsTest {
 
     const uuids = []
     for (let i = 0; i < 5; i++) {
-      const uuid = this.prefabTools.generateUUID()
+      const uuid = generateUuid()
       uuids.push(uuid)
       console.log(`UUID ${i + 1}: ${uuid}`)
     }

@@ -1,6 +1,24 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 import os from 'node:os'
 import process from 'node:process'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function getPort(value: unknown): number | undefined {
+  if (typeof value !== 'object' || value === null || !('port' in value)) {
+    return undefined
+  }
+  return typeof value.port === 'number' ? value.port : undefined
+}
 
 export class ServerTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -62,7 +80,11 @@ export class ServerTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'query_server_ip_list':
         return await this.queryServerIPList()
@@ -73,7 +95,9 @@ export class ServerTools implements ToolExecutor {
       case 'get_server_status':
         return await this.getServerStatus()
       case 'check_server_connectivity':
-        return await this.checkServerConnectivity(args.timeout)
+        return args.timeout === undefined || typeof args.timeout === 'number'
+          ? this.checkServerConnectivity(args.timeout)
+          : toolFailure('check_server_connectivity timeout must be a number when provided')
       case 'get_network_interfaces':
         return await this.getNetworkInterfaces()
       default:
@@ -140,7 +164,7 @@ export class ServerTools implements ToolExecutor {
           this.queryServerPort(),
         ])
 
-        const status: any = {
+        const status: Record<string, unknown> = {
           timestamp: new Date().toISOString(),
           serverRunning: true,
         }
@@ -164,9 +188,10 @@ export class ServerTools implements ToolExecutor {
         }
 
         // Add additional server info
-        const mcpSettings = await Editor.Message.request('cocos-mcp-server', 'get-server-settings').catch(() => ({ port: 3000 }))
-        status.mcpServerPort = mcpSettings?.port || 3000
-        status.editorVersion = (Editor as any).versions?.cocos || 'Unknown'
+        const mcpSettings: unknown = await Editor.Message.request('cocos-mcp-server', 'get-server-settings').catch(() => ({ port: 3000 }))
+        status.mcpServerPort = getPort(mcpSettings) ?? 3000
+        const editorWithVersions = Editor as unknown as { versions?: { cocos?: string } }
+        status.editorVersion = editorWithVersions.versions?.cocos || 'Unknown'
         status.platform = process.platform
         status.nodeVersion = process.version
 
@@ -175,10 +200,10 @@ export class ServerTools implements ToolExecutor {
           data: status,
         })
       }
-      catch (err: any) {
+      catch (error: unknown) {
         resolve({
           success: false,
-          error: `Failed to get server status: ${err.message}`,
+          error: `Failed to get server status: ${getErrorMessage(error)}`,
         })
       }
     })
@@ -209,7 +234,7 @@ export class ServerTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
+      catch (error: unknown) {
         const responseTime = Date.now() - startTime
 
         resolve({
@@ -218,7 +243,7 @@ export class ServerTools implements ToolExecutor {
             connected: false,
             responseTime,
             timeout,
-            error: err.message,
+            error: getErrorMessage(error),
           },
         })
       }
@@ -231,9 +256,9 @@ export class ServerTools implements ToolExecutor {
         // Get network interfaces using Node.js os module
         const interfaces = os.networkInterfaces()
 
-        const networkInfo = Object.entries(interfaces).map(([name, addresses]: [string, any]) => ({
+        const networkInfo = Object.entries(interfaces).map(([name, addresses]) => ({
           name,
-          addresses: addresses.map((addr: any) => ({
+          addresses: (addresses ?? []).map(addr => ({
             address: addr.address,
             family: addr.family,
             internal: addr.internal,
@@ -253,10 +278,10 @@ export class ServerTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
+      catch (error: unknown) {
         resolve({
           success: false,
-          error: `Failed to get network interfaces: ${err.message}`,
+          error: `Failed to get network interfaces: ${getErrorMessage(error)}`,
         })
       }
     })

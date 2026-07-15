@@ -1,4 +1,16 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+type PreferencesRequest = (channel: string, message: string, ...args: unknown[]) => Promise<unknown>
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function getPreferencesRequest(): PreferencesRequest {
+  return Editor.Message.request as unknown as PreferencesRequest
+}
 
 export class PreferencesTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -130,28 +142,49 @@ export class PreferencesTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'open_preferences_settings':
-        return await this.openPreferencesSettings(args.tab, args.args)
+        return (args.tab === undefined || typeof args.tab === 'string') && (args.args === undefined || Array.isArray(args.args))
+          ? this.openPreferencesSettings(args.tab, args.args)
+          : toolFailure('open_preferences_settings accepts an optional tab string and args array')
       case 'query_preferences_config':
-        return await this.queryPreferencesConfig(args.name, args.path, args.type)
+        return typeof args.name === 'string'
+          && (args.path === undefined || typeof args.path === 'string')
+          && (args.type === undefined || typeof args.type === 'string')
+          ? this.queryPreferencesConfig(args.name, args.path, args.type)
+          : toolFailure('query_preferences_config requires name and optional path/type strings')
       case 'set_preferences_config':
-        return await this.setPreferencesConfig(args.name, args.path, args.value, args.type)
+        return typeof args.name === 'string'
+          && typeof args.path === 'string'
+          && Object.hasOwn(args, 'value')
+          && (args.type === undefined || typeof args.type === 'string')
+          ? this.setPreferencesConfig(args.name, args.path, args.value, args.type)
+          : toolFailure('set_preferences_config requires name, path, value, and an optional type string')
       case 'get_all_preferences':
-        return await this.getAllPreferences()
+        return this.getAllPreferences()
       case 'reset_preferences':
-        return await this.resetPreferences(args.name, args.type)
+        return (args.name === undefined || typeof args.name === 'string') && (args.type === undefined || typeof args.type === 'string')
+          ? this.resetPreferences(args.name, args.type)
+          : toolFailure('reset_preferences accepts optional name and type strings')
       case 'export_preferences':
-        return await this.exportPreferences(args.exportPath)
+        return args.exportPath === undefined || typeof args.exportPath === 'string'
+          ? this.exportPreferences(args.exportPath)
+          : toolFailure('export_preferences exportPath must be a string when provided')
       case 'import_preferences':
-        return await this.importPreferences(args.importPath)
+        return typeof args.importPath === 'string'
+          ? this.importPreferences(args.importPath)
+          : toolFailure('import_preferences requires an importPath string')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
   }
 
-  private async openPreferencesSettings(tab?: string, args?: any[]): Promise<ToolResponse> {
+  private async openPreferencesSettings(tab?: string, args?: unknown[]): Promise<ToolResponse> {
     return new Promise((resolve) => {
       const requestArgs = []
       if (tab) {
@@ -161,7 +194,7 @@ export class PreferencesTools implements ToolExecutor {
         requestArgs.push(...args)
       }
 
-      (Editor.Message.request as any)('preferences', 'open-settings', ...requestArgs).then(() => {
+      getPreferencesRequest()('preferences', 'open-settings', ...requestArgs).then(() => {
         resolve({
           success: true,
           message: `Preferences settings opened${tab ? ` on tab: ${tab}` : ''}`,
@@ -178,9 +211,9 @@ export class PreferencesTools implements ToolExecutor {
       if (path) {
         requestArgs.push(path)
       }
-      requestArgs.push(type);
+      requestArgs.push(type)
 
-      (Editor.Message.request as any)('preferences', 'query-config', ...requestArgs).then((config: any) => {
+      getPreferencesRequest()('preferences', 'query-config', ...requestArgs).then((config: unknown) => {
         resolve({
           success: true,
           data: {
@@ -196,9 +229,10 @@ export class PreferencesTools implements ToolExecutor {
     })
   }
 
-  private async setPreferencesConfig(name: string, path: string, value: any, type: string = 'global'): Promise<ToolResponse> {
+  private async setPreferencesConfig(name: string, path: string, value: unknown, type: string = 'global'): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      (Editor.Message.request as any)('preferences', 'set-config', name, path, value, type).then((success: boolean) => {
+      getPreferencesRequest()('preferences', 'set-config', name, path, value, type).then((result: unknown) => {
+        const success = result === true
         if (success) {
           resolve({
             success: true,
@@ -232,11 +266,11 @@ export class PreferencesTools implements ToolExecutor {
         'builder',
       ]
 
-      const preferences: any = {}
+      const preferences: Record<string, unknown> = {}
 
       const queryPromises = categories.map((category) => {
         return Editor.Message.request('preferences', 'query-config', category, undefined, 'global')
-          .then((config: any) => {
+          .then((config: unknown) => {
             preferences[category] = config
           })
           .catch(() => {
@@ -268,9 +302,10 @@ export class PreferencesTools implements ToolExecutor {
     return new Promise((resolve) => {
       if (name) {
         // Reset specific preference category
-        Editor.Message.request('preferences', 'query-config', name, undefined, 'default').then((defaultConfig: any) => {
-          return (Editor.Message.request as any)('preferences', 'set-config', name, '', defaultConfig, type)
-        }).then((success: boolean) => {
+        Editor.Message.request('preferences', 'query-config', name, undefined, 'default').then((defaultConfig: unknown) => {
+          return getPreferencesRequest()('preferences', 'set-config', name, '', defaultConfig, type)
+        }).then((result: unknown) => {
+          const success = result === true
           if (success) {
             resolve({
               success: true,

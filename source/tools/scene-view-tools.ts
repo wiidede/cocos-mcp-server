@@ -1,4 +1,19 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 export class SceneViewTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -222,48 +237,54 @@ export class SceneViewTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'change_gizmo_tool':
-        return await this.changeGizmoTool(args.name)
+        return typeof args.name === 'string' ? this.changeGizmoTool(args.name) : toolFailure('change_gizmo_tool requires a name')
       case 'query_gizmo_tool_name':
-        return await this.queryGizmoToolName()
+        return this.queryGizmoToolName()
       case 'change_gizmo_pivot':
-        return await this.changeGizmoPivot(args.name)
+        return typeof args.name === 'string' ? this.changeGizmoPivot(args.name) : toolFailure('change_gizmo_pivot requires a name')
       case 'query_gizmo_pivot':
-        return await this.queryGizmoPivot()
+        return this.queryGizmoPivot()
       case 'query_gizmo_view_mode':
-        return await this.queryGizmoViewMode()
+        return this.queryGizmoViewMode()
       case 'change_gizmo_coordinate':
-        return await this.changeGizmoCoordinate(args.type)
+        return typeof args.type === 'string' ? this.changeGizmoCoordinate(args.type) : toolFailure('change_gizmo_coordinate requires a type')
       case 'query_gizmo_coordinate':
-        return await this.queryGizmoCoordinate()
+        return this.queryGizmoCoordinate()
       case 'change_view_mode_2d_3d':
-        return await this.changeViewMode2D3D(args.is2D)
+        return typeof args.is2D === 'boolean' ? this.changeViewMode2D3D(args.is2D) : toolFailure('change_view_mode_2d_3d requires is2D')
       case 'query_view_mode_2d_3d':
-        return await this.queryViewMode2D3D()
+        return this.queryViewMode2D3D()
       case 'set_grid_visible':
-        return await this.setGridVisible(args.visible)
+        return typeof args.visible === 'boolean' ? this.setGridVisible(args.visible) : toolFailure('set_grid_visible requires visible')
       case 'query_grid_visible':
-        return await this.queryGridVisible()
+        return this.queryGridVisible()
       case 'set_icon_gizmo_3d':
-        return await this.setIconGizmo3D(args.is3D)
+        return typeof args.is3D === 'boolean' ? this.setIconGizmo3D(args.is3D) : toolFailure('set_icon_gizmo_3d requires is3D')
       case 'query_icon_gizmo_3d':
-        return await this.queryIconGizmo3D()
+        return this.queryIconGizmo3D()
       case 'set_icon_gizmo_size':
-        return await this.setIconGizmoSize(args.size)
+        return typeof args.size === 'number' ? this.setIconGizmoSize(args.size) : toolFailure('set_icon_gizmo_size requires a numeric size')
       case 'query_icon_gizmo_size':
-        return await this.queryIconGizmoSize()
+        return this.queryIconGizmoSize()
       case 'focus_camera_on_nodes':
-        return await this.focusCameraOnNodes(args.uuids)
+        return args.uuids === undefined || isStringArray(args.uuids)
+          ? this.focusCameraOnNodes(args.uuids ?? null)
+          : toolFailure('focus_camera_on_nodes uuids must be a string array when provided')
       case 'align_camera_with_view':
-        return await this.alignCameraWithView()
+        return this.alignCameraWithView()
       case 'align_view_with_node':
-        return await this.alignViewWithNode()
+        return this.alignViewWithNode()
       case 'get_scene_view_status':
-        return await this.getSceneViewStatus()
+        return this.getSceneViewStatus()
       case 'reset_scene_view':
-        return await this.resetSceneView()
+        return this.resetSceneView()
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -554,7 +575,7 @@ export class SceneViewTools implements ToolExecutor {
           this.queryIconGizmoSize(),
         ])
 
-        const status: any = {
+        const status: Record<string, unknown> = {
           timestamp: new Date().toISOString(),
         }
 
@@ -587,10 +608,10 @@ export class SceneViewTools implements ToolExecutor {
           data: status,
         })
       }
-      catch (err: any) {
+      catch (error: unknown) {
         resolve({
           success: false,
-          error: `Failed to get scene view status: ${err.message}`,
+          error: `Failed to get scene view status: ${getErrorMessage(error)}`,
         })
       }
     })
@@ -617,10 +638,10 @@ export class SceneViewTools implements ToolExecutor {
           message: 'Scene view reset to default settings',
         })
       }
-      catch (err: any) {
+      catch (error: unknown) {
         resolve({
           success: false,
-          error: `Failed to reset scene view: ${err.message}`,
+          error: `Failed to reset scene view: ${getErrorMessage(error)}`,
         })
       }
     })

@@ -1,5 +1,36 @@
+import type { SceneComponentDump, SceneNodeDump } from '../editor-message'
 import type { NodeInfo, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { requestScene } from '../editor-message'
+import { getComponentType } from './component-query'
 import { ComponentTools } from './component-tools'
+import { is2DNodeInfo, normalizeNodeDumpValue, normalizeTransformValue as normalizeNodeTransformValue } from './node-value'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+interface NodeTransformInput extends ToolArguments {
+  uuid: string
+  position?: unknown
+  rotation?: unknown
+  scale?: unknown
+}
+
+interface CreateNodeInput extends ToolArguments {
+  name: string
+  parentUuid?: string
+  nodeType?: string
+  components?: string[]
+  assetUuid?: string
+  assetPath?: string
+  unlinkPrefab?: boolean
+  keepWorldTransform?: boolean
+  siblingIndex?: number
+  initialTransform?: Omit<NodeTransformInput, 'uuid'>
+}
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export class NodeTools implements ToolExecutor {
   private componentTools = new ComponentTools()
@@ -277,36 +308,48 @@ export class NodeTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'create_node':
-        return await this.createNode(args)
+        return typeof args.name === 'string' ? this.createNode(args as CreateNodeInput) : toolFailure('create_node requires a name string')
       case 'get_node_info':
-        return await this.getNodeInfo(args.uuid)
+        return typeof args.uuid === 'string' ? this.getNodeInfo(args.uuid) : toolFailure('get_node_info requires uuid')
       case 'find_nodes':
-        return await this.findNodes(args.pattern, args.exactMatch)
+        return typeof args.pattern === 'string' && (args.exactMatch === undefined || typeof args.exactMatch === 'boolean')
+          ? this.findNodes(args.pattern, args.exactMatch)
+          : toolFailure('find_nodes requires pattern and optional exactMatch')
       case 'find_node_by_name':
-        return await this.findNodeByName(args.name)
+        return typeof args.name === 'string' ? this.findNodeByName(args.name) : toolFailure('find_node_by_name requires name')
       case 'get_all_nodes':
-        return await this.getAllNodes()
+        return this.getAllNodes()
       case 'set_node_property':
-        return await this.setNodeProperty(args.uuid, args.property, args.value)
+        return typeof args.uuid === 'string' && typeof args.property === 'string' && Object.hasOwn(args, 'value')
+          ? this.setNodeProperty(args.uuid, args.property, args.value)
+          : toolFailure('set_node_property requires uuid, property, and value')
       case 'set_node_transform':
-        return await this.setNodeTransform(args)
+        return typeof args.uuid === 'string' ? this.setNodeTransform(args as NodeTransformInput) : toolFailure('set_node_transform requires uuid')
       case 'delete_node':
-        return await this.deleteNode(args.uuid)
+        return typeof args.uuid === 'string' ? this.deleteNode(args.uuid) : toolFailure('delete_node requires uuid')
       case 'move_node':
-        return await this.moveNode(args.nodeUuid, args.newParentUuid, args.siblingIndex)
+        return typeof args.nodeUuid === 'string' && typeof args.newParentUuid === 'string' && (args.siblingIndex === undefined || typeof args.siblingIndex === 'number')
+          ? this.moveNode(args.nodeUuid, args.newParentUuid, args.siblingIndex)
+          : toolFailure('move_node requires nodeUuid, newParentUuid, and optional siblingIndex')
       case 'duplicate_node':
-        return await this.duplicateNode(args.uuid, args.includeChildren)
+        return typeof args.uuid === 'string' && (args.includeChildren === undefined || typeof args.includeChildren === 'boolean')
+          ? this.duplicateNode(args.uuid, args.includeChildren)
+          : toolFailure('duplicate_node requires uuid and optional includeChildren')
       case 'detect_node_type':
-        return await this.detectNodeType(args.uuid)
+        return typeof args.uuid === 'string' ? this.detectNodeType(args.uuid) : toolFailure('detect_node_type requires uuid')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
   }
 
-  private async createNode(args: any): Promise<ToolResponse> {
+  private async createNode(args: CreateNodeInput): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
       try {
         let targetParentUuid = args.parentUuid
@@ -314,17 +357,13 @@ export class NodeTools implements ToolExecutor {
         // 如果没有提供父节点UUID，获取场景根节点
         if (!targetParentUuid) {
           try {
-            const sceneInfo = await Editor.Message.request('scene', 'query-node-tree')
-            if (sceneInfo && typeof sceneInfo === 'object' && !Array.isArray(sceneInfo) && Object.prototype.hasOwnProperty.call(sceneInfo, 'uuid')) {
-              targetParentUuid = (sceneInfo as any).uuid
-              console.log(`No parent specified, using scene root: ${targetParentUuid}`)
-            }
-            else if (Array.isArray(sceneInfo) && sceneInfo.length > 0 && sceneInfo[0].uuid) {
-              targetParentUuid = sceneInfo[0].uuid
+            const sceneInfo = await requestScene('query-node-tree')
+            if (typeof sceneInfo.uuid === 'string') {
+              targetParentUuid = sceneInfo.uuid
               console.log(`No parent specified, using scene root: ${targetParentUuid}`)
             }
             else {
-              const currentScene = await Editor.Message.request('scene', 'query-current-scene')
+              const currentScene = await requestScene('query-current-scene')
               if (currentScene && currentScene.uuid) {
                 targetParentUuid = currentScene.uuid
               }
@@ -362,7 +401,7 @@ export class NodeTools implements ToolExecutor {
         }
 
         // 构建create-node选项
-        const createNodeOptions: any = {
+        const createNodeOptions: Record<string, unknown> = {
           name: args.name,
         }
 
@@ -461,7 +500,7 @@ export class NodeTools implements ToolExecutor {
         }
 
         // 获取创建后的节点信息进行验证
-        let verificationData: any = null
+        let verificationData: Record<string, unknown> | null = null
         try {
           const nodeInfo = await this.getNodeInfo(uuid)
           if (nodeInfo.success) {
@@ -500,10 +539,10 @@ export class NodeTools implements ToolExecutor {
           verificationData,
         })
       }
-      catch (err: any) {
+      catch (err: unknown) {
         resolve({
           success: false,
-          error: `Failed to create node: ${err.message}. Args: ${JSON.stringify(args)}`,
+          error: `Failed to create node: ${err instanceof Error ? err.message : String(err)}. Args: ${JSON.stringify(args)}`,
         })
       }
     })
@@ -511,7 +550,7 @@ export class NodeTools implements ToolExecutor {
 
   private async getNodeInfo(uuid: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('scene', 'query-node', uuid).then((nodeData: any) => {
+      requestScene('query-node', uuid).then((nodeData) => {
         if (!nodeData) {
           resolve({
             success: false,
@@ -528,9 +567,9 @@ export class NodeTools implements ToolExecutor {
           position: nodeData.position?.value || { x: 0, y: 0, z: 0 },
           rotation: nodeData.rotation?.value || { x: 0, y: 0, z: 0 },
           scale: nodeData.scale?.value || { x: 1, y: 1, z: 1 },
-          parent: nodeData.parent?.value?.uuid || null,
+          parent: nodeData.parent?.value?.uuid,
           children: nodeData.children || [],
-          components: (nodeData.__comps__ || []).map((comp: any) => this.parseComponentSummary(comp)),
+          components: (nodeData.__comps__ || []).map(comp => this.parseComponentSummary(comp)),
           layer: nodeData.layer?.value || 1073741824,
           mobility: nodeData.mobility?.value || 0,
         }
@@ -545,7 +584,7 @@ export class NodeTools implements ToolExecutor {
    * 把 query-node 返回的原始组件对象解析为统一的概要信息。
    * 兼容多种 type 字段命名（type / cid / __type__）以及嵌套在 value 中的结构。
    */
-  private parseComponentSummary(comp: any): { type: string, name: string, uuid: string | null, enabled: boolean } {
+  private parseComponentSummary(comp: SceneComponentDump): { type: string, name: string, uuid: string | null, enabled: boolean } {
     const rawType = comp.type || comp.cid || comp.__type__ || ''
     const rawName = comp.value?.name || comp.name || ''
     // comp.uuid 可能是字符串，也可能是 { value: 'xxx' } 形式
@@ -553,15 +592,15 @@ export class NodeTools implements ToolExecutor {
     if (typeof comp.uuid === 'string') {
       compUuid = comp.uuid
     }
-    else if (comp.uuid && typeof comp.uuid === 'object' && 'value' in comp.uuid) {
-      compUuid = comp.uuid.value
+    else if (comp.uuid && typeof comp.uuid === 'object') {
+      compUuid = comp.uuid.value ?? null
     }
     else if (comp.value && comp.value.uuid) {
       if (typeof comp.value.uuid === 'string') {
         compUuid = comp.value.uuid
       }
-      else if (comp.value.uuid.value) {
-        compUuid = comp.value.uuid.value
+      else if (typeof comp.value.uuid === 'object') {
+        compUuid = comp.value.uuid.value ?? null
       }
     }
 
@@ -575,7 +614,7 @@ export class NodeTools implements ToolExecutor {
     }
   }
 
-  private friendlyComponentName(name: string, type: string, comp: any): string {
+  private friendlyComponentName(name: string, type: string, comp: SceneComponentDump): string {
     if (name && typeof name === 'string') {
       // 形如 "Emitter<UITransform>" 透传即可
       return name
@@ -593,20 +632,21 @@ export class NodeTools implements ToolExecutor {
     return new Promise((resolve) => {
       // Note: 'query-nodes-by-name' API doesn't exist in official documentation
       // Using tree traversal as primary approach
-      Editor.Message.request('scene', 'query-node-tree').then((tree: any) => {
-        const nodes: any[] = []
+      requestScene('query-node-tree').then((tree) => {
+        const nodes: Array<{ uuid?: string, name: string, path: string }> = []
 
-        const searchTree = (node: any, currentPath: string = '') => {
-          const nodePath = currentPath ? `${currentPath}/${node.name}` : node.name
+        const searchTree = (node: SceneNodeDump, currentPath: string = '') => {
+          const nodeName = node.name || 'Unknown'
+          const nodePath = currentPath ? `${currentPath}/${nodeName}` : nodeName
 
           const matches = exactMatch
-            ? node.name === pattern
-            : node.name.toLowerCase().includes(pattern.toLowerCase())
+            ? nodeName === pattern
+            : nodeName.toLowerCase().includes(pattern.toLowerCase())
 
           if (matches) {
             nodes.push({
               uuid: node.uuid,
-              name: node.name,
+              name: nodeName,
               path: nodePath,
             })
           }
@@ -631,7 +671,7 @@ export class NodeTools implements ToolExecutor {
           args: [pattern, exactMatch],
         }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
+        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
           resolve(result)
         }).catch((err2: Error) => {
           resolve({ success: false, error: `Tree search failed: ${err.message}, Scene script failed: ${err2.message}` })
@@ -643,7 +683,7 @@ export class NodeTools implements ToolExecutor {
   private async findNodeByName(name: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 优先尝试使用 Editor API 查询节点树并搜索
-      Editor.Message.request('scene', 'query-node-tree').then((tree: any) => {
+      requestScene('query-node-tree').then((tree) => {
         const foundNode = this.searchNodeInTree(tree, name)
         if (foundNode) {
           resolve({
@@ -666,7 +706,7 @@ export class NodeTools implements ToolExecutor {
           args: [name],
         }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
+        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
           resolve(result)
         }).catch((err2: Error) => {
           resolve({ success: false, error: `Direct API failed: ${err.message}, Scene script failed: ${err2.message}` })
@@ -675,7 +715,7 @@ export class NodeTools implements ToolExecutor {
     })
   }
 
-  private searchNodeInTree(node: any, targetName: string): any {
+  private searchNodeInTree(node: SceneNodeDump, targetName: string): SceneNodeDump | null {
     if (node.name === targetName) {
       return node
     }
@@ -695,10 +735,10 @@ export class NodeTools implements ToolExecutor {
   private async getAllNodes(): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // 尝试查询场景节点树
-      Editor.Message.request('scene', 'query-node-tree').then((tree: any) => {
-        const nodes: any[] = []
+      requestScene('query-node-tree').then((tree) => {
+        const nodes: Array<{ uuid?: string, name?: string, type?: string, active?: boolean, path: string }> = []
 
-        const traverseTree = (node: any) => {
+        const traverseTree = (node: SceneNodeDump) => {
           nodes.push({
             uuid: node.uuid,
             name: node.name,
@@ -733,7 +773,7 @@ export class NodeTools implements ToolExecutor {
           args: [],
         }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
+        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
           resolve(result)
         }).catch((err2: Error) => {
           resolve({ success: false, error: `Direct API failed: ${err.message}, Scene script failed: ${err2.message}` })
@@ -742,11 +782,11 @@ export class NodeTools implements ToolExecutor {
     })
   }
 
-  private getNodePath(node: any): string {
-    const path = [node.name]
+  private getNodePath(node: SceneNodeDump): string {
+    const path = [node.name || 'Unknown']
     let current = node.parent
     while (current && current.name !== 'Canvas') {
-      path.unshift(current.name)
+      path.unshift(current.name || 'Unknown')
       current = current.parent
     }
     return path.join('/')
@@ -758,105 +798,25 @@ export class NodeTools implements ToolExecutor {
    *   - ValueType (Color/Size/Vec2/Vec3)：原样 + dump.type 推导
    *   - 其他：原样
    */
-  private normalizeValueForDump(value: any, propertyName: string): { dumpValue: any, dumpType?: string } {
-    if (value === null || value === undefined) {
-      return { dumpValue: value }
-    }
-    if (Array.isArray(value)) {
-      return { dumpValue: value, dumpType: this.inferValueDumpType(value, propertyName) }
-    }
-    if (typeof value !== 'object') {
-      return { dumpValue: value }
-    }
-    const keys = Object.keys(value)
-    // 1) 引用类型：含 __id__ / __uuid__ / uuid 字段
-    if (keys.includes('__id__') || keys.includes('__uuid__') || keys.includes('uuid')) {
-      const refId: string = value.uuid || value.__id__ || value.__uuid__
-      let type: string | undefined = value.__type__
-      if (typeof type === 'string') {
-        if (type === 'Node' || type === 'cc.Node')
-          type = 'cc.Node'
-        else if (type === 'Component' || type === 'cc.Component')
-          type = 'cc.Component'
-        else if (!type.startsWith('cc.'))
-          type = `cc.${type}`
-      }
-      if (!type) {
-        // fallback：根据属性名猜
-        if (propertyName && /node|target|child|parent|root|container/i.test(propertyName)) {
-          type = 'cc.Node'
-        }
-        else {
-          type = 'cc.Asset'
-        }
-      }
-      return { dumpValue: { uuid: refId }, dumpType: type }
-    }
-    // 2) ValueType：自动推导 type
-    const dumpType = this.inferValueDumpType(value, propertyName)
-    return { dumpValue: value, dumpType }
-  }
-
-  /**
-   * 根据 value 的 JSON 形状自动推导出 Cocos Creator 期望的 dump.type。
-   * 缺省时 set-property API 对 Size/Color/Vec2/Vec3 等 ValueType 写入会"静默失败"。
-   */
-  private inferValueDumpType(value: any, propertyName: string): string | undefined {
-    if (value === null || value === undefined) {
-      return undefined
-    }
-    if (Array.isArray(value)) {
-      return undefined
-    }
-    if (typeof value !== 'object') {
-      return undefined
-    }
-    const keys = Object.keys(value)
-    // 引用类型：含 uuid 字段
-    if (keys.includes('uuid') || keys.includes('__uuid__') || keys.includes('__id__')) {
-      if (propertyName && /node|target|child|parent|root/i.test(propertyName)) {
-        return 'cc.Node'
-      }
-      return 'cc.Asset'
-    }
-    // Color
-    if (keys.includes('r') || keys.includes('g') || keys.includes('b')) {
-      return 'cc.Color'
-    }
-    // Size
-    if (keys.includes('width') && keys.includes('height')) {
-      return 'cc.Size'
-    }
-    // Vec3
-    if (keys.includes('x') && keys.includes('y') && keys.includes('z')) {
-      return 'cc.Vec3'
-    }
-    // Vec2
-    if (keys.includes('x') && keys.includes('y')) {
-      return 'cc.Vec2'
-    }
-    return undefined
-  }
-
-  private async setNodeProperty(uuid: string, property: string, value: any): Promise<ToolResponse> {
+  private async setNodeProperty(uuid: string, property: string, value: unknown): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      const { dumpValue, dumpType } = this.normalizeValueForDump(value, property)
-      const dump: any = { value: dumpValue }
+      const { dumpValue, dumpType } = normalizeNodeDumpValue(value, property)
+      const dump: { value: unknown, type?: string } = { value: dumpValue }
       if (dumpType) {
         dump.type = dumpType
       }
 
       // 尝试直接使用 Editor API 设置节点属性
-      Editor.Message.request('scene', 'set-property', {
+      requestScene('set-property', {
         uuid,
         path: property,
         dump,
       }).then(async () => {
         // 验证：重新 query 节点确认值是否真的写入
         let verified = false
-        let actualStoredValue: any
+        let actualStoredValue: unknown
         try {
-          const nodeData: any = await Editor.Message.request('scene', 'query-node', uuid)
+          const nodeData = await requestScene('query-node', uuid)
           if (nodeData && Array.isArray(nodeData.__comps__)) {
             // 寻找挂在该节点上的某个组件（任意一个），从中读出该 property
             for (const c of nodeData.__comps__) {
@@ -909,7 +869,7 @@ export class NodeTools implements ToolExecutor {
           args: [uuid, property, value, dumpType],
         }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result: any) => {
+        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
           resolve(result)
         }).catch((err2: Error) => {
           resolve({ success: false, error: `Direct API failed: ${err.message}, Scene script failed: ${err2.message}` })
@@ -918,10 +878,10 @@ export class NodeTools implements ToolExecutor {
     })
   }
 
-  private async setNodeTransform(args: any): Promise<ToolResponse> {
+  private async setNodeTransform(args: NodeTransformInput): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
       const { uuid, position, rotation, scale } = args
-      const updatePromises: Promise<any>[] = []
+      const updatePromises: Promise<unknown>[] = []
       const updates: string[] = []
       const warnings: string[] = []
 
@@ -934,16 +894,16 @@ export class NodeTools implements ToolExecutor {
         }
 
         const nodeInfo = nodeInfoResponse.data
-        const is2DNode = this.is2DNode(nodeInfo)
+        const is2DNode = is2DNodeInfo(nodeInfo)
 
         if (position) {
-          const normalizedPosition = this.normalizeTransformValue(position, 'position', is2DNode)
+          const normalizedPosition = normalizeNodeTransformValue(position, 'position', is2DNode)
           if (normalizedPosition.warning) {
             warnings.push(normalizedPosition.warning)
           }
 
           updatePromises.push(
-            Editor.Message.request('scene', 'set-property', {
+            requestScene('set-property', {
               uuid,
               path: 'position',
               dump: { value: normalizedPosition.value },
@@ -953,13 +913,13 @@ export class NodeTools implements ToolExecutor {
         }
 
         if (rotation) {
-          const normalizedRotation = this.normalizeTransformValue(rotation, 'rotation', is2DNode)
+          const normalizedRotation = normalizeNodeTransformValue(rotation, 'rotation', is2DNode)
           if (normalizedRotation.warning) {
             warnings.push(normalizedRotation.warning)
           }
 
           updatePromises.push(
-            Editor.Message.request('scene', 'set-property', {
+            requestScene('set-property', {
               uuid,
               path: 'rotation',
               dump: { value: normalizedRotation.value },
@@ -969,13 +929,13 @@ export class NodeTools implements ToolExecutor {
         }
 
         if (scale) {
-          const normalizedScale = this.normalizeTransformValue(scale, 'scale', is2DNode)
+          const normalizedScale = normalizeNodeTransformValue(scale, 'scale', is2DNode)
           if (normalizedScale.warning) {
             warnings.push(normalizedScale.warning)
           }
 
           updatePromises.push(
-            Editor.Message.request('scene', 'set-property', {
+            requestScene('set-property', {
               uuid,
               path: 'scale',
               dump: { value: normalizedScale.value },
@@ -993,7 +953,7 @@ export class NodeTools implements ToolExecutor {
 
         // Verify the changes by getting updated node info
         const updatedNodeInfo = await this.getNodeInfo(uuid)
-        const response: any = {
+        const response: ToolResponse = {
           success: true,
           message: `Transform properties updated: ${updates.join(', ')} ${is2DNode ? '(2D node)' : '(3D node)'}`,
           updatedProperties: updates,
@@ -1027,107 +987,13 @@ export class NodeTools implements ToolExecutor {
 
         resolve(response)
       }
-      catch (err: any) {
+      catch (err: unknown) {
         resolve({
           success: false,
-          error: `Failed to update transform: ${err.message}`,
+          error: `Failed to update transform: ${err instanceof Error ? err.message : String(err)}`,
         })
       }
     })
-  }
-
-  private is2DNode(nodeInfo: any): boolean {
-    // Check if node has 2D-specific components or is under Canvas
-    const components = nodeInfo.components || []
-
-    // Check for common 2D components
-    const has2DComponents = components.some((comp: any) =>
-      comp.type && (
-        comp.type.includes('cc.Sprite')
-        || comp.type.includes('cc.Label')
-        || comp.type.includes('cc.Button')
-        || comp.type.includes('cc.Layout')
-        || comp.type.includes('cc.Widget')
-        || comp.type.includes('cc.Mask')
-        || comp.type.includes('cc.Graphics')
-      ),
-    )
-
-    if (has2DComponents) {
-      return true
-    }
-
-    // Check for 3D-specific components
-    const has3DComponents = components.some((comp: any) =>
-      comp.type && (
-        comp.type.includes('cc.MeshRenderer')
-        || comp.type.includes('cc.Camera')
-        || comp.type.includes('cc.Light')
-        || comp.type.includes('cc.DirectionalLight')
-        || comp.type.includes('cc.PointLight')
-        || comp.type.includes('cc.SpotLight')
-      ),
-    )
-
-    if (has3DComponents) {
-      return false
-    }
-
-    // Default heuristic: if z position is 0 and hasn't been changed, likely 2D
-    const position = nodeInfo.position
-    if (position && Math.abs(position.z) < 0.001) {
-      return true
-    }
-
-    // Default to 3D if uncertain
-    return false
-  }
-
-  private normalizeTransformValue(value: any, type: 'position' | 'rotation' | 'scale', is2D: boolean): { value: any, warning?: string } {
-    const result = { ...value }
-    let warning: string | undefined
-
-    if (is2D) {
-      switch (type) {
-        case 'position':
-          if (value.z !== undefined && Math.abs(value.z) > 0.001) {
-            warning = `2D node: z position (${value.z}) ignored, set to 0`
-            result.z = 0
-          }
-          else if (value.z === undefined) {
-            result.z = 0
-          }
-          break
-
-        case 'rotation':
-          if ((value.x !== undefined && Math.abs(value.x) > 0.001)
-            || (value.y !== undefined && Math.abs(value.y) > 0.001)) {
-            warning = `2D node: x,y rotations ignored, only z rotation applied`
-            result.x = 0
-            result.y = 0
-          }
-          else {
-            result.x = result.x || 0
-            result.y = result.y || 0
-          }
-          result.z = result.z || 0
-          break
-
-        case 'scale':
-          if (value.z === undefined) {
-            result.z = 1 // Default scale for 2D
-          }
-          break
-      }
-    }
-    else {
-      // 3D node - ensure all axes are defined
-      result.x = result.x !== undefined ? result.x : (type === 'scale' ? 1 : 0)
-      result.y = result.y !== undefined ? result.y : (type === 'scale' ? 1 : 0)
-      result.z = result.z !== undefined ? result.z : (type === 'scale' ? 1 : 0)
-    }
-
-    return { value: result, warning }
   }
 
   private async deleteNode(uuid: string): Promise<ToolResponse> {
@@ -1164,11 +1030,11 @@ export class NodeTools implements ToolExecutor {
   private async duplicateNode(uuid: string, includeChildren: boolean = true): Promise<ToolResponse> {
     return new Promise((resolve) => {
       // Note: includeChildren parameter is accepted for future use but not currently implemented
-      Editor.Message.request('scene', 'duplicate-node', uuid).then((result: any) => {
+      Editor.Message.request('scene', 'duplicate-node', uuid).then((result) => {
         resolve({
           success: true,
           data: {
-            newUuid: result.uuid,
+            newUuid: result[0] ?? null,
             message: 'Node duplicated successfully',
           },
         })
@@ -1188,43 +1054,26 @@ export class NodeTools implements ToolExecutor {
         }
 
         const nodeInfo = nodeInfoResponse.data
-        const is2D = this.is2DNode(nodeInfo)
-        const components = nodeInfo.components || []
+        const is2D = is2DNodeInfo(nodeInfo)
+        const components: unknown[] = Array.isArray(nodeInfo.components) ? nodeInfo.components : []
 
         // Collect detection reasons
         const detectionReasons: string[] = []
 
         // Check for 2D components
-        const twoDComponents = components.filter((comp: any) =>
-          comp.type && (
-            comp.type.includes('cc.Sprite')
-            || comp.type.includes('cc.Label')
-            || comp.type.includes('cc.Button')
-            || comp.type.includes('cc.Layout')
-            || comp.type.includes('cc.Widget')
-            || comp.type.includes('cc.Mask')
-            || comp.type.includes('cc.Graphics')
-          ),
-        )
+        const twoDComponents = components.filter(component => ['cc.Sprite', 'cc.Label', 'cc.Button', 'cc.Layout', 'cc.Widget', 'cc.Mask', 'cc.Graphics']
+          .some(type => getComponentType(component)?.includes(type)))
 
         // Check for 3D components
-        const threeDComponents = components.filter((comp: any) =>
-          comp.type && (
-            comp.type.includes('cc.MeshRenderer')
-            || comp.type.includes('cc.Camera')
-            || comp.type.includes('cc.Light')
-            || comp.type.includes('cc.DirectionalLight')
-            || comp.type.includes('cc.PointLight')
-            || comp.type.includes('cc.SpotLight')
-          ),
-        )
+        const threeDComponents = components.filter(component => ['cc.MeshRenderer', 'cc.Camera', 'cc.Light', 'cc.DirectionalLight', 'cc.PointLight', 'cc.SpotLight']
+          .some(type => getComponentType(component)?.includes(type)))
 
         if (twoDComponents.length > 0) {
-          detectionReasons.push(`Has 2D components: ${twoDComponents.map((c: any) => c.type).join(', ')}`)
+          detectionReasons.push(`Has 2D components: ${twoDComponents.map(component => getComponentType(component) ?? 'Unknown').join(', ')}`)
         }
 
         if (threeDComponents.length > 0) {
-          detectionReasons.push(`Has 3D components: ${threeDComponents.map((c: any) => c.type).join(', ')}`)
+          detectionReasons.push(`Has 3D components: ${threeDComponents.map(component => getComponentType(component) ?? 'Unknown').join(', ')}`)
         }
 
         // Check position for heuristic
@@ -1247,9 +1096,9 @@ export class NodeTools implements ToolExecutor {
             nodeName: nodeInfo.name,
             nodeType: is2D ? '2D' : '3D',
             detectionReasons,
-            components: components.map((comp: any) => ({
-              type: comp.type,
-              category: this.getComponentCategory(comp.type),
+            components: components.map(component => ({
+              type: getComponentType(component) ?? 'Unknown',
+              category: this.getComponentCategory(getComponentType(component) ?? ''),
             })),
             position: nodeInfo.position,
             transformConstraints: {
@@ -1260,10 +1109,10 @@ export class NodeTools implements ToolExecutor {
           },
         })
       }
-      catch (err: any) {
+      catch (err: unknown) {
         resolve({
           success: false,
-          error: `Failed to detect node type: ${err.message}`,
+          error: `Failed to detect node type: ${err instanceof Error ? err.message : String(err)}`,
         })
       }
     })

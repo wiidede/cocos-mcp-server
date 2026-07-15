@@ -1,6 +1,9 @@
-import type { MCPServerSettings, ToolDefinition, ToolResponse } from '../types'
+import type { JsonSchema, MCPServerSettings, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import { requestScene } from '../editor-message'
 import { AssetAdvancedTools } from './asset-advanced-tools'
 import { BroadcastTools } from './broadcast-tools'
+import { buildButtonClickEvent, getButtonEventFieldName, getButtonEvents } from './component-event'
+import { componentMatchesType } from './component-query'
 import { ComponentTools } from './component-tools'
 import { DebugTools } from './debug-tools'
 import { NodeTools } from './node-tools'
@@ -12,6 +15,7 @@ import { SceneAdvancedTools } from './scene-advanced-tools'
 import { SceneTools } from './scene-tools'
 import { SceneViewTools } from './scene-view-tools'
 import { ServerTools } from './server-tools'
+import { toolFailure } from './tool-response'
 import { ValidationTools } from './validation-tools'
 
 interface ToolInfoProvider {
@@ -20,8 +24,10 @@ interface ToolInfoProvider {
 }
 
 type RegisteredTool = ToolDefinition & {
-  execute: (args: any) => Promise<ToolResponse>
+  execute: (args: ToolArguments) => Promise<ToolResponse>
 }
+
+type ToolArguments = Record<string, unknown>
 
 type LegacyPrefix
   = | 'sceneAdvanced'
@@ -57,11 +63,11 @@ const LEGACY_PREFIXES: LegacyPrefix[] = [
 ]
 
 const PROP = {
-  string: (description: string, extra: Record<string, any> = {}) => ({ type: 'string', description, ...extra }),
-  number: (description: string, extra: Record<string, any> = {}) => ({ type: 'number', description, ...extra }),
-  boolean: (description: string, extra: Record<string, any> = {}) => ({ type: 'boolean', description, ...extra }),
-  object: (description: string, extra: Record<string, any> = {}) => ({ type: 'object', description, ...extra }),
-  array: (description: string, items: Record<string, any> = { type: 'string' }, extra: Record<string, any> = {}) => ({
+  string: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'string', description, ...extra }),
+  number: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'number', description, ...extra }),
+  boolean: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'boolean', description, ...extra }),
+  object: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'object', description, ...extra }),
+  array: (description: string, items: JsonSchema = { type: 'string' }, extra: Record<string, unknown> = {}): JsonSchema => ({
     type: 'array',
     items,
     description,
@@ -69,7 +75,7 @@ const PROP = {
   }),
 }
 
-const SHARED_PROPERTIES: Record<string, any> = {
+const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   uuid: PROP.string('UUID'),
   uuids: {
     oneOf: [
@@ -185,8 +191,8 @@ const SHARED_PROPERTIES: Record<string, any> = {
   checkPerformance: PROP.boolean('Check performance', { default: true }),
 }
 
-function pickProps(keys: string[]): Record<string, any> {
-  const selected: Record<string, any> = {}
+function pickProps(keys: string[]): Record<string, JsonSchema> {
+  const selected: Record<string, JsonSchema> = {}
   for (const key of keys) {
     selected[key] = SHARED_PROPERTIES[key]
   }
@@ -194,7 +200,7 @@ function pickProps(keys: string[]): Record<string, any> {
 }
 
 export class UnifiedTools {
-  private readonly legacy = {
+  private readonly legacy: Record<LegacyPrefix, ToolExecutor> = {
     scene: new SceneTools(),
     node: new NodeTools(),
     component: new ComponentTools(),
@@ -221,12 +227,17 @@ export class UnifiedTools {
     return this.tools.map(({ execute, ...tool }) => tool)
   }
 
-  public async execute(name: string, args: any): Promise<ToolResponse> {
+  public async execute(name: string, args: unknown): Promise<ToolResponse> {
     const tool = this.tools.find(item => item.name === name)
     if (!tool) {
       throw new Error(`Tool ${name} not found`)
     }
-    return tool.execute(args ?? {})
+    if (!this.isToolArguments(args)) {
+      return toolFailure(`Tool ${name} requires an object argument`, {
+        instruction: 'Call tools/list or tool_registry.describe, then retry with a JSON object containing an action.',
+      })
+    }
+    return tool.execute(args)
   }
 
   private buildTools(): RegisteredTool[] {
@@ -822,7 +833,7 @@ export class UnifiedTools {
     description: string,
     actions: string[],
     propertyKeys: string[],
-    execute: (args: any) => Promise<ToolResponse>,
+    execute: (args: ToolArguments) => Promise<ToolResponse>,
   ): RegisteredTool {
     return {
       name,
@@ -843,23 +854,19 @@ export class UnifiedTools {
     }
   }
 
-  private async routeLegacyAction(toolName: string, actionMap: Record<string, string>, args: any): Promise<ToolResponse> {
+  private async routeLegacyAction(toolName: string, actionMap: Record<string, string>, args: ToolArguments): Promise<ToolResponse> {
     const action = args?.action
-    if (!action) {
-      return {
-        success: false,
-        error: `${toolName} requires an action parameter`,
+    if (typeof action !== 'string' || !action) {
+      return toolFailure(`${toolName} requires an action parameter`, {
         instruction: `Call tool_registry.actions or inspect tools/list, then retry with one of: ${Object.keys(actionMap).join(', ')}`,
-      }
+      })
     }
 
     const target = actionMap[action]
     if (!target) {
-      return {
-        success: false,
-        error: `Unsupported action '${action}' for ${toolName}. Available actions: ${Object.keys(actionMap).join(', ')}`,
+      return toolFailure(`Unsupported action '${action}' for ${toolName}. Available actions: ${Object.keys(actionMap).join(', ')}`, {
         instruction: `Retry ${toolName} with action set to one of: ${Object.keys(actionMap).join(', ')}`,
-      }
+      })
     }
 
     const payload = { ...args }
@@ -868,15 +875,14 @@ export class UnifiedTools {
       const result = await this.callLegacy(target, payload)
       return this.withFailureInstruction(result, toolName, action, payload)
     }
-    catch (error: any) {
-      return this.withFailureInstruction({
-        success: false,
-        error: error?.message ?? String(error),
-      }, toolName, action, payload)
+    catch (error: unknown) {
+      return this.withFailureInstruction(toolFailure(
+        error instanceof Error ? error.message : String(error),
+      ), toolName, action, payload)
     }
   }
 
-  private withFailureInstruction(result: ToolResponse, toolName: string, action: string, args: any): ToolResponse {
+  private withFailureInstruction(result: ToolResponse, toolName: string, action: string, args: ToolArguments): ToolResponse {
     if (result.success || result.instruction) {
       return result
     }
@@ -892,7 +898,7 @@ export class UnifiedTools {
     }
   }
 
-  private getFailureInstruction(toolName: string, action: string, error: string, args: any): string | undefined {
+  private getFailureInstruction(toolName: string, action: string, error: string, args: ToolArguments): string | undefined {
     const lowerError = error.toLowerCase()
 
     if (lowerError.includes('requires') && lowerError.includes('uuid')) {
@@ -940,11 +946,11 @@ export class UnifiedTools {
     return `Inspect ${toolName} with tool_registry.describe, verify the required arguments for action '${action}', then retry.`
   }
 
-  private async callLegacy(fullName: string, args: any): Promise<ToolResponse> {
+  private async callLegacy(fullName: string, args: ToolArguments): Promise<ToolResponse> {
     for (const prefix of LEGACY_PREFIXES) {
       const prefixWithSeparator = `${prefix}_`
       if (fullName.startsWith(prefixWithSeparator)) {
-        const executor = (this.legacy as any)[prefix]
+        const executor = this.legacy[prefix]
         const toolName = fullName.slice(prefixWithSeparator.length)
         return executor.execute(toolName, args)
       }
@@ -953,7 +959,11 @@ export class UnifiedTools {
     throw new Error(`Legacy tool ${fullName} not found`)
   }
 
-  private async handleServerControl(args: any): Promise<ToolResponse> {
+  private isToolArguments(args: unknown): args is ToolArguments {
+    return typeof args === 'object' && args !== null && !Array.isArray(args)
+  }
+
+  private async handleServerControl(args: ToolArguments): Promise<ToolResponse> {
     switch (args.action) {
       case 'health':
         return {
@@ -990,7 +1000,7 @@ export class UnifiedTools {
     }
   }
 
-  private async handleToolRegistry(args: any): Promise<ToolResponse> {
+  private async handleToolRegistry(args: ToolArguments): Promise<ToolResponse> {
     const tools = this.getTools()
     switch (args.action) {
       case 'list':
@@ -1035,9 +1045,9 @@ export class UnifiedTools {
     }
   }
 
-  private async handleComponentEventBinding(args: any): Promise<ToolResponse> {
-    const nodeUuid = args.nodeUuid
-    const componentType = args.componentType || 'cc.Button'
+  private async handleComponentEventBinding(args: ToolArguments): Promise<ToolResponse> {
+    const nodeUuid = typeof args.nodeUuid === 'string' ? args.nodeUuid : ''
+    const componentType = typeof args.componentType === 'string' ? args.componentType : 'cc.Button'
 
     if (!nodeUuid) {
       return {
@@ -1057,8 +1067,8 @@ export class UnifiedTools {
         }
       }
 
-      const fieldName = this.getButtonEventFieldName(componentInfo.component)
-      const currentEvents = Array.isArray((componentInfo.component as any)[fieldName]) ? (componentInfo.component as any)[fieldName] : []
+      const fieldName = getButtonEventFieldName(componentInfo.component)
+      const currentEvents = getButtonEvents(componentInfo.component, fieldName)
 
       switch (args.action) {
         case 'get_button_events':
@@ -1100,7 +1110,7 @@ export class UnifiedTools {
         case 'append_button_event': {
           const nextEvents = [
             ...currentEvents,
-            this.buildButtonClickEvent(args),
+            buildButtonClickEvent(args),
           ]
           await this.setRawComponentProperty(nodeUuid, componentInfo.index, fieldName, nextEvents)
           return {
@@ -1122,51 +1132,34 @@ export class UnifiedTools {
           }
       }
     }
-    catch (error: any) {
+    catch (error: unknown) {
       return {
         success: false,
-        error: `Failed to process component event binding: ${error.message}`,
+        error: `Failed to process component event binding: ${error instanceof Error ? error.message : String(error)}`,
         instruction: 'Confirm nodeUuid, Button componentType/cid, targetNodeUuid, component name, and handler name before retrying.',
       }
     }
   }
 
-  private buildButtonClickEvent(args: any): any {
-    return {
-      __type__: 'cc.ClickEvent',
-      target: args.targetNodeUuid ? { uuid: args.targetNodeUuid } : null,
-      component: args.component || '',
-      handler: args.handler || '',
-      customEventData: args.customEventData || '',
-    }
-  }
-
-  private async getRawComponentInfo(nodeUuid: string, componentType: string): Promise<{ index: number, component: any } | null> {
-    const nodeData = await Editor.Message.request('scene', 'query-node', nodeUuid)
+  private async getRawComponentInfo(nodeUuid: string, componentType: string): Promise<{ index: number, component: Record<string, unknown> } | null> {
+    const nodeData = await requestScene('query-node', nodeUuid)
     if (!nodeData || !Array.isArray(nodeData.__comps__)) {
       return null
     }
 
-    const exactIndex = nodeData.__comps__.findIndex((component: any) => component.type === componentType)
+    const exactIndex = nodeData.__comps__.findIndex(component => componentMatchesType(component, componentType))
     if (exactIndex >= 0) {
       return {
         index: exactIndex,
-        component: nodeData.__comps__[exactIndex],
+        component: nodeData.__comps__[exactIndex] as Record<string, unknown>,
       }
     }
 
     return null
   }
 
-  private getButtonEventFieldName(component: any): string {
-    if (component && Object.prototype.hasOwnProperty.call(component, '_clickEvents')) {
-      return '_clickEvents'
-    }
-    return 'clickEvents'
-  }
-
-  private async setRawComponentProperty(nodeUuid: string, componentIndex: number, fieldName: string, value: any): Promise<void> {
-    await Editor.Message.request('scene', 'set-property', {
+  private async setRawComponentProperty(nodeUuid: string, componentIndex: number, fieldName: string, value: unknown): Promise<void> {
+    await requestScene('set-property', {
       uuid: nodeUuid,
       path: `__comps__.${componentIndex}.${fieldName}`,
       dump: { value },

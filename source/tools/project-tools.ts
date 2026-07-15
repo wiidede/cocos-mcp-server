@@ -1,6 +1,27 @@
 import type { AssetInfo, ProjectInfo, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { filterAssetsByName } from './project-asset'
+import { toolFailure } from './tool-response'
+
+type ToolArguments = Record<string, unknown>
+
+interface BuildProjectInput extends ToolArguments {
+  platform: string
+  debug?: boolean
+}
+
+interface FindAssetInput extends ToolArguments {
+  name: string
+  exactMatch?: boolean
+  assetType?: string
+  folder?: string
+  maxResults?: number
+}
+
+function isToolArguments(value: unknown): value is ToolArguments {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export class ProjectTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
@@ -391,56 +412,91 @@ export class ProjectTools implements ToolExecutor {
     ]
   }
 
-  async execute(toolName: string, args: any): Promise<ToolResponse> {
+  async execute(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!isToolArguments(args)) {
+      return toolFailure('Tool arguments must be a JSON object')
+    }
+
     switch (toolName) {
       case 'run_project':
-        return await this.runProject(args.platform)
+        return args.platform === undefined || typeof args.platform === 'string'
+          ? this.runProject(args.platform)
+          : toolFailure('run_project platform must be a string when provided')
       case 'build_project':
-        return await this.buildProject(args)
+        return typeof args.platform === 'string' && (args.debug === undefined || typeof args.debug === 'boolean')
+          ? this.buildProject({ ...args, platform: args.platform, debug: args.debug })
+          : toolFailure('build_project requires platform and an optional debug boolean')
       case 'get_project_info':
-        return await this.getProjectInfo()
+        return this.getProjectInfo()
       case 'get_project_settings':
-        return await this.getProjectSettings(args.category)
+        return args.category === undefined || typeof args.category === 'string'
+          ? this.getProjectSettings(args.category)
+          : toolFailure('get_project_settings category must be a string when provided')
       case 'refresh_assets':
-        return await this.refreshAssets(args.folder)
+        return args.folder === undefined || typeof args.folder === 'string'
+          ? this.refreshAssets(args.folder)
+          : toolFailure('refresh_assets folder must be a string when provided')
       case 'import_asset':
-        return await this.importAsset(args.sourcePath, args.targetFolder)
+        return typeof args.sourcePath === 'string' && typeof args.targetFolder === 'string'
+          ? this.importAsset(args.sourcePath, args.targetFolder)
+          : toolFailure('import_asset requires sourcePath and targetFolder strings')
       case 'get_asset_info':
-        return await this.getAssetInfo(args.assetPath)
+        return typeof args.assetPath === 'string' ? this.getAssetInfo(args.assetPath) : toolFailure('get_asset_info requires assetPath')
       case 'get_assets':
-        return await this.getAssets(args.type, args.folder)
+        return (args.type === undefined || typeof args.type === 'string') && (args.folder === undefined || typeof args.folder === 'string')
+          ? this.getAssets(args.type, args.folder)
+          : toolFailure('get_assets accepts optional type and folder strings')
       case 'get_build_settings':
-        return await this.getBuildSettings()
+        return this.getBuildSettings()
       case 'open_build_panel':
-        return await this.openBuildPanel()
+        return this.openBuildPanel()
       case 'check_builder_status':
-        return await this.checkBuilderStatus()
+        return this.checkBuilderStatus()
       case 'start_preview_server':
-        return await this.startPreviewServer(args.port)
+        return args.port === undefined || typeof args.port === 'number'
+          ? this.startPreviewServer(args.port)
+          : toolFailure('start_preview_server port must be a number when provided')
       case 'stop_preview_server':
-        return await this.stopPreviewServer()
+        return this.stopPreviewServer()
       case 'create_asset':
-        return await this.createAsset(args.url, args.content, args.overwrite)
+        return typeof args.url === 'string' && (args.content === undefined || typeof args.content === 'string' || args.content === null)
+          && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
+          ? this.createAsset(args.url, args.content, args.overwrite)
+          : toolFailure('create_asset requires url and optional string content/overwrite boolean')
       case 'copy_asset':
-        return await this.copyAsset(args.source, args.target, args.overwrite)
+        return typeof args.source === 'string' && typeof args.target === 'string' && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
+          ? this.copyAsset(args.source, args.target, args.overwrite)
+          : toolFailure('copy_asset requires source, target, and optional overwrite')
       case 'move_asset':
-        return await this.moveAsset(args.source, args.target, args.overwrite)
+        return typeof args.source === 'string' && typeof args.target === 'string' && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
+          ? this.moveAsset(args.source, args.target, args.overwrite)
+          : toolFailure('move_asset requires source, target, and optional overwrite')
       case 'delete_asset':
-        return await this.deleteAsset(args.url)
+        return typeof args.url === 'string' ? this.deleteAsset(args.url) : toolFailure('delete_asset requires url')
       case 'save_asset':
-        return await this.saveAsset(args.url, args.content)
+        return typeof args.url === 'string' && typeof args.content === 'string'
+          ? this.saveAsset(args.url, args.content)
+          : toolFailure('save_asset requires url and content strings')
       case 'reimport_asset':
-        return await this.reimportAsset(args.url)
+        return typeof args.url === 'string' ? this.reimportAsset(args.url) : toolFailure('reimport_asset requires url')
       case 'query_asset_path':
-        return await this.queryAssetPath(args.url)
+        return typeof args.url === 'string' ? this.queryAssetPath(args.url) : toolFailure('query_asset_path requires url')
       case 'query_asset_uuid':
-        return await this.queryAssetUuid(args.url)
+        return typeof args.url === 'string' ? this.queryAssetUuid(args.url) : toolFailure('query_asset_uuid requires url')
       case 'query_asset_url':
-        return await this.queryAssetUrl(args.uuid)
+        return typeof args.uuid === 'string' ? this.queryAssetUrl(args.uuid) : toolFailure('query_asset_url requires uuid')
       case 'find_asset_by_name':
-        return await this.findAssetByName(args)
+        return typeof args.name === 'string'
+          && (args.exactMatch === undefined || typeof args.exactMatch === 'boolean')
+          && (args.assetType === undefined || typeof args.assetType === 'string')
+          && (args.folder === undefined || typeof args.folder === 'string')
+          && (args.maxResults === undefined || typeof args.maxResults === 'number')
+          ? this.findAssetByName({ ...args, name: args.name, exactMatch: args.exactMatch, assetType: args.assetType, folder: args.folder, maxResults: args.maxResults })
+          : toolFailure('find_asset_by_name requires name and optional matching filters')
       case 'get_asset_details':
-        return await this.getAssetDetails(args.assetPath, args.includeSubAssets)
+        return typeof args.assetPath === 'string' && (args.includeSubAssets === undefined || typeof args.includeSubAssets === 'boolean')
+          ? this.getAssetDetails(args.assetPath, args.includeSubAssets)
+          : toolFailure('get_asset_details requires assetPath and optional includeSubAssets')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -466,7 +522,7 @@ export class ProjectTools implements ToolExecutor {
     })
   }
 
-  private async buildProject(args: any): Promise<ToolResponse> {
+  private async buildProject(args: BuildProjectInput): Promise<ToolResponse> {
     return new Promise((resolve) => {
       const buildOptions = {
         platform: args.platform,
@@ -498,12 +554,12 @@ export class ProjectTools implements ToolExecutor {
         name: Editor.Project.name,
         path: Editor.Project.path,
         uuid: Editor.Project.uuid,
-        version: (Editor.Project as any).version || '1.0.0',
-        cocosVersion: (Editor as any).versions?.cocos || 'Unknown',
+        version: typeof (Editor.Project as unknown as Record<string, unknown>).version === 'string' ? (Editor.Project as unknown as Record<string, string>).version : '1.0.0',
+        cocosVersion: typeof (Editor as unknown as { versions?: Record<string, unknown> }).versions?.cocos === 'string' ? (Editor as unknown as { versions: Record<string, string> }).versions.cocos : 'Unknown',
       }
 
       // Note: 'query-info' API doesn't exist, using 'query-config' instead
-      Editor.Message.request('project', 'query-config', 'project').then((additionalInfo: any) => {
+      Editor.Message.request('project', 'query-config', 'project').then((additionalInfo) => {
         if (additionalInfo) {
           Object.assign(info, { config: additionalInfo })
         }
@@ -527,7 +583,7 @@ export class ProjectTools implements ToolExecutor {
 
       const configName = configMap[category] || 'project'
 
-      Editor.Message.request('project', 'query-config', configName).then((settings: any) => {
+      Editor.Message.request('project', 'query-config', configName).then((settings) => {
         resolve({
           success: true,
           data: {
@@ -570,7 +626,11 @@ export class ProjectTools implements ToolExecutor {
         ? targetFolder
         : `db://assets/${targetFolder}`
 
-      Editor.Message.request('asset-db', 'import-asset', sourcePath, `${targetPath}/${fileName}`).then((result: any) => {
+      Editor.Message.request('asset-db', 'import-asset', sourcePath, `${targetPath}/${fileName}`).then((result) => {
+        if (!result) {
+          resolve({ success: false, error: 'Asset import returned no result' })
+          return
+        }
         resolve({
           success: true,
           data: {
@@ -587,7 +647,7 @@ export class ProjectTools implements ToolExecutor {
 
   private async getAssetInfo(assetPath: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('asset-db', 'query-asset-info', assetPath).then((assetInfo: any) => {
+      Editor.Message.request('asset-db', 'query-asset-info', assetPath).then((assetInfo) => {
         if (!assetInfo) {
           throw new Error('Asset not found')
         }
@@ -597,7 +657,6 @@ export class ProjectTools implements ToolExecutor {
           uuid: assetInfo.uuid,
           path: assetInfo.url,
           type: assetInfo.type,
-          size: assetInfo.size,
           isDirectory: assetInfo.isDirectory,
         }
 
@@ -639,13 +698,12 @@ export class ProjectTools implements ToolExecutor {
       }
 
       // Note: query-assets API parameters corrected based on documentation
-      Editor.Message.request('asset-db', 'query-assets', { pattern }).then((results: any[]) => {
+      Editor.Message.request('asset-db', 'query-assets', { pattern }).then((results) => {
         const assets = results.map(asset => ({
           name: asset.name,
           uuid: asset.uuid,
           path: asset.url,
           type: asset.type,
-          size: asset.size || 0,
           isDirectory: asset.isDirectory || false,
         }))
 
@@ -745,7 +803,7 @@ export class ProjectTools implements ToolExecutor {
         rename: !overwrite,
       }
 
-      Editor.Message.request('asset-db', 'create-asset', url, content, options).then((result: any) => {
+      Editor.Message.request('asset-db', 'create-asset', url, content, options).then((result) => {
         if (result && result.uuid) {
           resolve({
             success: true,
@@ -778,7 +836,7 @@ export class ProjectTools implements ToolExecutor {
         rename: !overwrite,
       }
 
-      Editor.Message.request('asset-db', 'copy-asset', source, target, options).then((result: any) => {
+      Editor.Message.request('asset-db', 'copy-asset', source, target, options).then((result) => {
         if (result && result.uuid) {
           resolve({
             success: true,
@@ -812,7 +870,7 @@ export class ProjectTools implements ToolExecutor {
         rename: !overwrite,
       }
 
-      Editor.Message.request('asset-db', 'move-asset', source, target, options).then((result: any) => {
+      Editor.Message.request('asset-db', 'move-asset', source, target, options).then((result) => {
         if (result && result.uuid) {
           resolve({
             success: true,
@@ -841,7 +899,7 @@ export class ProjectTools implements ToolExecutor {
 
   private async deleteAsset(url: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('asset-db', 'delete-asset', url).then((result: any) => {
+      Editor.Message.request('asset-db', 'delete-asset', url).then((result) => {
         resolve({
           success: true,
           data: {
@@ -857,7 +915,7 @@ export class ProjectTools implements ToolExecutor {
 
   private async saveAsset(url: string, content: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('asset-db', 'save-asset', url, content).then((result: any) => {
+      Editor.Message.request('asset-db', 'save-asset', url, content).then((result) => {
         if (result && result.uuid) {
           resolve({
             success: true,
@@ -965,7 +1023,7 @@ export class ProjectTools implements ToolExecutor {
     })
   }
 
-  private async findAssetByName(args: any): Promise<ToolResponse> {
+  private async findAssetByName(args: FindAssetInput): Promise<ToolResponse> {
     const { name, exactMatch = false, assetType = 'all', folder = 'db://assets', maxResults = 20 } = args
 
     return new Promise(async (resolve) => {
@@ -980,42 +1038,27 @@ export class ProjectTools implements ToolExecutor {
           return
         }
 
-        const allAssets = allAssetsResponse.data.assets as any[]
-        const matchedAssets: any[] = []
+        const allAssets = allAssetsResponse.data.assets as Record<string, unknown>[]
+        const matchedAssets: Record<string, unknown>[] = []
 
-        // Search for matching assets
-        for (const asset of allAssets) {
-          const assetName = asset.name
-          let matches = false
-
-          if (exactMatch) {
-            matches = assetName === name
-          }
-          else {
-            matches = assetName.toLowerCase().includes(name.toLowerCase())
-          }
-
-          if (matches) {
-            // Get detailed asset info if needed
-            try {
-              const detailResponse = await this.getAssetInfo(asset.path)
-              if (detailResponse.success) {
-                matchedAssets.push({
-                  ...asset,
-                  details: detailResponse.data,
-                })
-              }
-              else {
-                matchedAssets.push(asset)
-              }
+        for (const asset of filterAssetsByName(allAssets, name, exactMatch, maxResults)) {
+          // Get detailed asset info if needed
+          try {
+            if (typeof asset.path !== 'string')
+              continue
+            const detailResponse = await this.getAssetInfo(asset.path)
+            if (detailResponse.success) {
+              matchedAssets.push({
+                ...asset,
+                details: detailResponse.data,
+              })
             }
-            catch {
+            else {
               matchedAssets.push(asset)
             }
-
-            if (matchedAssets.length >= maxResults) {
-              break
-            }
+          }
+          catch {
+            matchedAssets.push(asset)
           }
         }
 
@@ -1033,10 +1076,10 @@ export class ProjectTools implements ToolExecutor {
           },
         })
       }
-      catch (error: any) {
+      catch (error: unknown) {
         resolve({
           success: false,
-          error: `Asset search failed: ${error.message}`,
+          error: `Asset search failed: ${error instanceof Error ? error.message : String(error)}`,
         })
       }
     })
@@ -1053,9 +1096,10 @@ export class ProjectTools implements ToolExecutor {
         }
 
         const assetInfo = assetInfoResponse.data
-        const detailedInfo: any = {
+        const subAssets: Record<string, unknown>[] = []
+        const detailedInfo: Record<string, unknown> = {
           ...assetInfo,
-          subAssets: [],
+          subAssets,
         }
 
         if (includeSubAssets && assetInfo) {
@@ -1074,7 +1118,7 @@ export class ProjectTools implements ToolExecutor {
                 // Try to get URL for the sub-asset to verify it exists
                 const subAssetUrl = await Editor.Message.request('asset-db', 'query-url', subAsset.uuid)
                 if (subAssetUrl) {
-                  detailedInfo.subAssets.push({
+                  subAssets.push({
                     type: subAsset.type,
                     uuid: subAsset.uuid,
                     url: subAssetUrl,
@@ -1095,14 +1139,14 @@ export class ProjectTools implements ToolExecutor {
             assetPath,
             includeSubAssets,
             ...detailedInfo,
-            message: `Asset details retrieved. Found ${detailedInfo.subAssets.length} sub-assets.`,
+            message: `Asset details retrieved. Found ${subAssets.length} sub-assets.`,
           },
         })
       }
-      catch (error: any) {
+      catch (error: unknown) {
         resolve({
           success: false,
-          error: `Failed to get asset details: ${error.message}`,
+          error: `Failed to get asset details: ${error instanceof Error ? error.message : String(error)}`,
         })
       }
     })

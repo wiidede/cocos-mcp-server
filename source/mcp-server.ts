@@ -1,6 +1,50 @@
-import type { MCPClient, MCPServerSettings, ServerStatus, ToolDefinition } from './types'
+import type { MCPClient, MCPServerSettings, ServerStatus, ToolConfig, ToolDefinition, ToolResponse } from './types'
 import * as http from 'node:http'
 import { UnifiedTools } from './tools/unified-tools'
+
+type JsonRpcId = string | number | null
+type JsonRecord = Record<string, unknown>
+
+interface JsonRpcError {
+  code: number
+  message: string
+}
+
+interface JsonRpcResponse {
+  jsonrpc: '2.0'
+  id: JsonRpcId
+  result?: unknown
+  error?: JsonRpcError
+}
+
+interface InitializeParams extends JsonRecord {
+  protocolVersion: string
+}
+
+const PROTOCOL_VERSION = '2024-11-05'
+
+interface SimplifiedToolDefinition {
+  name: string
+  category: string
+  toolName: string
+  description: string
+  apiPath: string
+  curlExample: string
+}
+
+class JsonRpcRequestError extends Error {
+  constructor(public readonly code: number, message: string) {
+    super(message)
+  }
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 export class MCPServer {
   private settings: MCPServerSettings
@@ -8,7 +52,7 @@ export class MCPServer {
   private clients: Map<string, MCPClient> = new Map()
   private unifiedTools!: UnifiedTools
   private toolsList: ToolDefinition[] = []
-  private enabledTools: any[] = [] // 存储启用的工具列表
+  private enabledTools: ToolConfig[] = []
 
   constructor(settings: MCPServerSettings) {
     this.settings = settings
@@ -39,7 +83,7 @@ export class MCPServer {
     try {
       console.log(`[MCPServer] Starting HTTP server on port ${this.settings.port}...`)
       this.httpServer = http.createServer(this.handleHttpRequest.bind(this))
-      const listenHost = '0.0.0.0'
+      const listenHost = '127.0.0.1'
 
       await new Promise<void>((resolve, reject) => {
         this.httpServer!.listen(this.settings.port, listenHost, () => {
@@ -48,7 +92,7 @@ export class MCPServer {
           console.log(`[MCPServer] MCP endpoint: http://127.0.0.1:${this.settings.port}/mcp`)
           resolve()
         })
-        this.httpServer!.on('error', (err: any) => {
+        this.httpServer!.on('error', (err: NodeJS.ErrnoException) => {
           console.error('[MCPServer] ❌ Failed to start server:', err)
           if (err.code === 'EADDRINUSE') {
             console.error(`[MCPServer] Port ${this.settings.port} is already in use. Please change the port in settings.`)
@@ -80,7 +124,7 @@ export class MCPServer {
     console.log(`[MCPServer] Setup tools: ${this.toolsList.length} tools available`)
   }
 
-  public getFilteredTools(enabledTools: any[]): ToolDefinition[] {
+  public getFilteredTools(enabledTools: ToolConfig[]): ToolDefinition[] {
     if (!enabledTools || enabledTools.length === 0) {
       return this.toolsList // 如果没有过滤配置，返回所有工具
     }
@@ -89,7 +133,14 @@ export class MCPServer {
     return this.toolsList.filter(tool => enabledToolNames.has(tool.name))
   }
 
-  public async executeToolCall(toolName: string, args: any): Promise<any> {
+  public async executeToolCall(toolName: string, args: unknown): Promise<ToolResponse> {
+    if (!this.toolsList.some(tool => tool.name === toolName)) {
+      throw new Error(`Tool ${toolName} is not enabled`)
+    }
+    return this.unifiedTools.execute(toolName, args)
+  }
+
+  public async executeDevTestToolCall(toolName: string, args: unknown): Promise<ToolResponse> {
     return this.unifiedTools.execute(toolName, args)
   }
 
@@ -101,7 +152,7 @@ export class MCPServer {
     return this.toolsList
   }
 
-  public updateEnabledTools(enabledTools: any[]): void {
+  public updateEnabledTools(enabledTools: ToolConfig[]): void {
     console.log(`[MCPServer] Updating enabled tools: ${enabledTools.length} tools`)
     this.enabledTools = enabledTools
     this.setupTools() // 重新设置工具列表
@@ -165,28 +216,18 @@ export class MCPServer {
 
     req.on('end', async () => {
       try {
-        // Enhanced JSON parsing with better error handling
-        let message
-        try {
-          message = JSON.parse(body)
-        }
-        catch (parseError: any) {
-          // Try to fix common JSON issues
-          const fixedBody = this.fixCommonJsonIssues(body)
-          try {
-            message = JSON.parse(fixedBody)
-            console.log('[MCPServer] Fixed JSON parsing issue')
-          }
-          catch (secondError) {
-            throw new Error(`JSON parsing failed: ${parseError.message}. Original body: ${body.substring(0, 500)}...`)
-          }
-        }
+        const message = JSON.parse(body)
 
         const response = await this.handleMessage(message)
+        if (!response) {
+          res.writeHead(202)
+          res.end()
+          return
+        }
         res.writeHead(200)
         res.end(JSON.stringify(response))
       }
-      catch (error: any) {
+      catch (error: unknown) {
         console.error('Error handling MCP request:', error)
         res.writeHead(400)
         res.end(JSON.stringify({
@@ -194,18 +235,29 @@ export class MCPServer {
           id: null,
           error: {
             code: -32700,
-            message: `Parse error: ${error.message}`,
+            message: `Parse error: ${getErrorMessage(error)}`,
           },
         }))
       }
     })
   }
 
-  private async handleMessage(message: any): Promise<any> {
-    const { id, method, params } = message
+  private async handleMessage(message: unknown): Promise<JsonRpcResponse | null> {
+    if (!isRecord(message) || typeof message.method !== 'string') {
+      return this.createErrorResponse(null, -32600, 'Invalid Request')
+    }
+
+    const id = typeof message.id === 'string' || typeof message.id === 'number' || message.id === null
+      ? message.id
+      : null
+    const { method, params } = message
+
+    if (method === 'notifications/initialized') {
+      return null
+    }
 
     try {
-      let result: any
+      let result: unknown
 
       switch (method) {
         case 'tools/list':
@@ -213,15 +265,23 @@ export class MCPServer {
           break
         case 'tools/call':
         {
+          if (!isRecord(params) || typeof params.name !== 'string') {
+            throw new JsonRpcRequestError(-32602, 'Invalid params: tools/call requires a tool name')
+          }
           const { name, arguments: args } = params
           const toolResult = await this.executeToolCall(name, args)
-          result = { content: [{ type: 'text', text: JSON.stringify(toolResult) }] }
+          result = {
+            content: [{ type: 'text', text: JSON.stringify(toolResult) }],
+            isError: !toolResult.success,
+          }
           break
         }
         case 'initialize':
-          // MCP initialization
+          if (!this.isInitializeParams(params)) {
+            throw new JsonRpcRequestError(-32602, 'Invalid params: initialize requires protocolVersion')
+          }
           result = {
-            protocolVersion: '2024-11-05',
+            protocolVersion: this.negotiateProtocolVersion(params.protocolVersion),
             capabilities: {
               tools: {},
             },
@@ -232,7 +292,7 @@ export class MCPServer {
           }
           break
         default:
-          throw new Error(`Unknown method: ${method}`)
+          throw new JsonRpcRequestError(-32601, `Method not found: ${method}`)
       }
 
       return {
@@ -241,37 +301,27 @@ export class MCPServer {
         result,
       }
     }
-    catch (error: any) {
-      return {
-        jsonrpc: '2.0',
-        id,
-        error: {
-          code: -32603,
-          message: error.message,
-        },
+    catch (error: unknown) {
+      if (error instanceof JsonRpcRequestError) {
+        return this.createErrorResponse(id, error.code, error.message)
       }
+      return this.createErrorResponse(id, -32603, getErrorMessage(error))
     }
   }
 
-  private fixCommonJsonIssues(jsonStr: string): string {
-    let fixed = jsonStr
+  private createErrorResponse(id: JsonRpcId, code: number, message: string): JsonRpcResponse {
+    return { jsonrpc: '2.0', id, error: { code, message } }
+  }
 
-    // Fix common escape character issues
-    fixed = fixed
-    // Fix unescaped quotes in strings
-      .replace(/([^\\])"([^"]*[^\\])"([^,}\]:])/g, '$1\\"$2\\"$3')
-    // Fix unescaped backslashes
-      .replace(/([^\\])\\([^"\\/bfnrt])/g, '$1\\\\$2')
-    // Fix trailing commas
-      .replace(/,(\s*[}\]])/g, '$1')
-    // Fix single quotes (should be double quotes)
-      .replace(/'/g, '"')
-    // Fix common control characters
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t')
+  private isInitializeParams(params: unknown): params is InitializeParams {
+    return isRecord(params) && typeof params.protocolVersion === 'string'
+  }
 
-    return fixed
+  private negotiateProtocolVersion(clientVersion: string): string {
+    if (clientVersion !== PROTOCOL_VERSION) {
+      console.warn(`[MCPServer] Client requested protocol ${clientVersion}; using supported version ${PROTOCOL_VERSION}`)
+    }
+    return PROTOCOL_VERSION
   }
 
   public stop(): void {
@@ -313,27 +363,17 @@ export class MCPServer {
         const toolName = pathParts[2]
         const fullToolName = `${category}_${toolName}`
 
-        // Parse parameters with enhanced error handling
-        let params
+        let params: unknown
         try {
           params = body ? JSON.parse(body) : {}
         }
-        catch (parseError: any) {
-          // Try to fix JSON issues
-          const fixedBody = this.fixCommonJsonIssues(body)
-          try {
-            params = JSON.parse(fixedBody)
-            console.log('[MCPServer] Fixed API JSON parsing issue')
-          }
-          catch (secondError: any) {
-            res.writeHead(400)
-            res.end(JSON.stringify({
-              error: 'Invalid JSON in request body',
-              details: parseError.message,
-              receivedBody: body.substring(0, 200),
-            }))
-            return
-          }
+        catch (parseError: unknown) {
+          res.writeHead(400)
+          res.end(JSON.stringify({
+            error: 'Invalid JSON in request body',
+            details: getErrorMessage(parseError),
+          }))
+          return
         }
 
         // Execute tool
@@ -346,19 +386,19 @@ export class MCPServer {
           result,
         }))
       }
-      catch (error: any) {
+      catch (error: unknown) {
         console.error('Simple API error:', error)
         res.writeHead(500)
         res.end(JSON.stringify({
           success: false,
-          error: error.message,
+          error: getErrorMessage(error),
           tool: pathname,
         }))
       }
     })
   }
 
-  private getSimplifiedToolsList(): any[] {
+  private getSimplifiedToolsList(): SimplifiedToolDefinition[] {
     return this.toolsList.map((tool) => {
       const parts = tool.name.split('_')
       const category = parts[0]
@@ -375,7 +415,7 @@ export class MCPServer {
     })
   }
 
-  private generateCurlExample(category: string, toolName: string, schema: any): string {
+  private generateCurlExample(category: string, toolName: string, schema: unknown): string {
     // Generate sample parameters based on schema
     const sampleParams = this.generateSampleParams(schema)
     const jsonString = JSON.stringify(sampleParams, null, 2)
@@ -385,13 +425,17 @@ export class MCPServer {
   -d '${jsonString}'`
   }
 
-  private generateSampleParams(schema: any): any {
-    if (!schema || !schema.properties)
+  private generateSampleParams(schema: unknown): JsonRecord {
+    if (!isRecord(schema) || !isRecord(schema.properties))
       return {}
 
-    const sample: any = {}
-    for (const [key, prop] of Object.entries(schema.properties as any)) {
-      const propSchema = prop as any
+    const sample: JsonRecord = {}
+    for (const [key, prop] of Object.entries(schema.properties)) {
+      if (!isRecord(prop)) {
+        sample[key] = 'example_value'
+        continue
+      }
+      const propSchema = prop
       switch (propSchema.type) {
         case 'string':
           sample[key] = propSchema.default || 'example_string'

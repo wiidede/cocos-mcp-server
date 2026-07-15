@@ -88,7 +88,7 @@ export class ToolManager {
     try {
       const tools = new UnifiedTools()
       this.availableTools = []
-      tools.getTools().forEach((tool: any) => {
+      tools.getTools().forEach((tool) => {
         const separatorIndex = tool.name.indexOf('_')
         const category = separatorIndex >= 0 ? tool.name.slice(0, separatorIndex) : tool.name
         const name = separatorIndex >= 0 ? tool.name.slice(separatorIndex + 1) : tool.name

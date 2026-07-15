@@ -242,7 +242,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
     if (!mcpServer) {
       throw new Error('MCP server is not initialized')
     }
-    return mcpServer.executeToolCall(toolName, args ?? {})
+    return mcpServer.executeDevTestToolCall(toolName, args ?? {})
   },
 }
 
