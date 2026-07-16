@@ -1,3 +1,5 @@
+import { isSerializedScriptClassId } from './prefab-format'
+
 type ComponentRecord = Record<string, unknown>
 
 function asRecord(value: unknown): ComponentRecord | null {
@@ -8,6 +10,13 @@ export function getComponentType(component: unknown): string | null {
   const record = asRecord(component)
   if (!record)
     return null
+  const value = asRecord(record.value)
+  const scriptClassId = [record.cid, value?.cid, record.__type__, value?.__type__, record.type]
+    .find(candidate => typeof candidate === 'string' && isSerializedScriptClassId(candidate))
+  if (typeof scriptClassId === 'string')
+    return scriptClassId
+  if ((record.__type__ === 'cc.Script' || record.__type__ === 'cc.MissingScript') && typeof record.cid === 'string' && record.cid)
+    return record.cid
   for (const key of ['__type__', 'cid', 'type']) {
     if (typeof record[key] === 'string' && record[key])
       return record[key] as string
@@ -80,11 +89,12 @@ export function extractComponentProperties(component: unknown): ComponentRecord 
 export function summarizeComponent(component: unknown, includeProperties: boolean): ComponentRecord {
   const record = asRecord(component) ?? {}
   const value = asRecord(record.value)
-  const uuidValue = asRecord(record.uuid)?.value ?? record.uuid ?? null
+  const uuidValue = getComponentSceneId(record)
   const result: ComponentRecord = {
     type: getComponentType(record) ?? 'Unknown',
+    cid: typeof record.cid === 'string' && record.cid.length > 0 ? record.cid : null,
     name: value?.name ?? record.type ?? record.cid ?? '',
-    uuid: typeof uuidValue === 'string' ? uuidValue : null,
+    uuid: uuidValue,
     enabled: typeof record.enabled === 'boolean' ? record.enabled : true,
   }
   if (includeProperties)

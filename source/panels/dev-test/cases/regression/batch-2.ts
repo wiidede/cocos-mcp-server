@@ -222,7 +222,7 @@ export const batch2Tests: TestCase[] = [
     regression: {
       bugId: 'v1.5.1-recent-03',
       fixedIn: 'v1.5.1',
-      rootCause: '资产导入触发异步场景重载，销毁了刚创建的节点。修复：1) create_default_spriteframe 幂等化（缓存检查），2) 首次导入后等待场景就绪，3) 组件读取匹配逻辑修复（去掉 cc. 前缀后比较）。',
+      rootCause: 'component_property 丢弃 Inspector 属性 dump.path，自行用公开属性名拼写入路径；SpriteFrame 的序列化 backing field 因此没有被更新。修复后使用 dump.path，并检查 set-property 的布尔结果。',
     },
     run: async (ctx) => {
       // 1) 生成 SpriteFrame
@@ -252,14 +252,15 @@ export const batch2Tests: TestCase[] = [
         componentType: 'cc.Sprite',
         nodeUuid: uuid,
         property: 'spriteFrame',
-        propertyType: 'asset',
-        value: sfUuid,
+        propertyType: 'cc.SpriteFrame',
+        value: { uuid: sfUuid },
       })
       ctx.step('set spriteFrame', setResp?.success === true, setResp?.error?.slice(0, 200) ?? 'ok')
+      ctx.assert(setResp?.data?.changeVerified === true, `changeVerified=${setResp?.data?.changeVerified}, actualValue=${JSON.stringify(setResp?.data?.actualValue)}`)
       await sleep(200)
 
-      // 4) 读回来验证
-      const got = await readComponentValue(uuid, 'cc.Sprite', '_spriteFrame')
+      // 4) 直接从当前场景 dump 读回来验证，不保存测试场景
+      const got = await readComponentValue(uuid, 'cc.Sprite', 'spriteFrame')
 
       // 调试：显示 got 的完整内容
       ctx.step('debug: got value', true, `type=${typeof got}, json=${JSON.stringify(got)?.slice(0, 200)}`)
@@ -267,7 +268,7 @@ export const batch2Tests: TestCase[] = [
       const gotUuid = got?.uuid ?? got
       ctx.step('debug: gotUuid', true, `${gotUuid}`)
 
-      ctx.step('read _spriteFrame back', got != null, JSON.stringify(got)?.slice(0, 200))
+      ctx.step('read spriteFrame back', got != null, JSON.stringify(got)?.slice(0, 200))
       ctx.assert(
         gotUuid && (gotUuid === sfUuid || String(gotUuid).includes(sfUuid) || sfUuid.includes(String(gotUuid))),
         `spriteFrame uuid mismatch: expected ${sfUuid}, got ${gotUuid}`,

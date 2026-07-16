@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createColor, createPrefabMeta, createSize, createVec3, extractPrefabValue, generateFileId, generateUuid, getComponentPropertyValue, parsePrefabDocument, shouldCopyComponentProperty, uuidToCompressedId, validatePrefabFormat } from './prefab-format'
+import { createColor, createPrefabMeta, createSize, createVec3, extractPrefabValue, generateFileId, generateUuid, getComponentPropertyValue, isSerializedScriptClassId, parsePrefabDocument, shouldCopyComponentProperty, uuidToCompressedId, validatePrefabFormat } from './prefab-format'
 
 describe('prefab format helpers', () => {
   it('generates deterministic identifiers with injected randomness', () => {
@@ -11,7 +11,22 @@ describe('prefab format helpers', () => {
 
   it('validates prefab roots and counts nodes and components', () => {
     expect(validatePrefabFormat({})).toMatchObject({ isValid: false, nodeCount: 0 })
-    expect(validatePrefabFormat([{ __type__: 'cc.Prefab' }, { __type__: 'cc.Node' }, { __type__: 'cc.Sprite' }])).toEqual({ isValid: true, issues: [], nodeCount: 1, componentCount: 2 })
+    expect(validatePrefabFormat([{ __type__: 'cc.Prefab' }, { __type__: 'cc.Node' }, { __type__: 'cc.Sprite', node: { __id__: 1 } }])).toEqual({ isValid: true, issues: [], nodeCount: 1, componentCount: 1 })
+  })
+
+  it('rejects custom component class names and missing scripts', () => {
+    const base = [{ __type__: 'cc.Prefab' }, { __type__: 'cc.Node' }]
+    expect(validatePrefabFormat([...base, { __type__: 'TitleScreen', node: { __id__: 1 } }])).toMatchObject({
+      isValid: false,
+      issues: [expect.stringContaining('\'TitleScreen\'')],
+    })
+    expect(validatePrefabFormat([...base, { __type__: 'cc.MissingScript', node: { __id__: 1 } }])).toMatchObject({
+      isValid: false,
+      issues: [expect.stringContaining('cc.MissingScript')],
+    })
+    expect(validatePrefabFormat([...base, { __type__: '31d33yUSnFMT49oD/z9L/HB', node: { __id__: 1 } }])).toMatchObject({ isValid: true, componentCount: 1 })
+    expect(isSerializedScriptClassId('31d33yUSnFMT49oD/z9L/HB')).toBe(true)
+    expect(isSerializedScriptClassId('TitleScreen')).toBe(false)
   })
 
   it('extracts dump values from supported component locations', () => {

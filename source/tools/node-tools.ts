@@ -418,14 +418,8 @@ export class NodeTools implements ToolExecutor {
           }
         }
 
-        // 添加组件
-        if (args.components && args.components.length > 0) {
-          createNodeOptions.components = args.components
-        }
-        else if (args.nodeType && args.nodeType !== 'Node' && !finalAssetUuid) {
-          // 只有在不从资源实例化时才添加nodeType组件
-          createNodeOptions.components = [args.nodeType]
-        }
+        if (args.nodeType && args.nodeType !== 'Node' && !finalAssetUuid)
+          createNodeOptions.type = args.nodeType
 
         // 保持世界变换
         if (args.keepWorldTransform) {

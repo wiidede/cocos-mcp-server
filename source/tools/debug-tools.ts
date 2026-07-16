@@ -84,7 +84,7 @@ export class DebugTools implements ToolExecutor {
       },
       {
         name: 'execute_script',
-        description: 'Execute JavaScript in scene context',
+        description: 'Legacy compatibility endpoint. Arbitrary JavaScript execution is not supported.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -290,23 +290,10 @@ export class DebugTools implements ToolExecutor {
     }
   }
 
-  private async executeScript(script: string): Promise<ToolResponse> {
-    return new Promise((resolve) => {
-      Editor.Message.request('scene', 'execute-scene-script', {
-        name: 'console',
-        method: 'eval',
-        args: [script],
-      }).then((result) => {
-        resolve({
-          success: true,
-          data: {
-            result,
-            message: 'Script executed successfully',
-          },
-        })
-      }).catch((err: Error) => {
-        resolve({ success: false, error: err.message })
-      })
+  private executeScript(script: string): ToolResponse {
+    return toolFailure('Arbitrary JavaScript execution is not supported by Cocos Creator scene scripts.', {
+      instruction: 'Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or scene_execution_control.execute_scene_script for a method already exported by a registered scene script.',
+      data: { rejectedScriptLength: script.length },
     })
   }
 

@@ -16,6 +16,13 @@ export interface AnalyzedComponentProperty extends PropertyTypeContext {
   originalValue: unknown
   declaredType?: string
   declaredExtends?: string[]
+  declaredPath?: string
+  isArray?: boolean
+}
+
+export interface CanonicalAssetReference {
+  uuid: string
+  type?: string
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -44,6 +51,8 @@ export function analyzeComponentProperty(component: unknown, propertyName: strin
   let exists = Object.hasOwn(source, propertyName)
   let declaredType: string | undefined
   let declaredExtends: string[] | undefined
+  let declaredPath: string | undefined
+  let isArray: boolean | undefined
 
   if (exists)
     originalValue = source[propertyName]
@@ -58,6 +67,8 @@ export function analyzeComponentProperty(component: unknown, propertyName: strin
         declaredExtends = Array.isArray(descriptorRecord?.extends) && descriptorRecord.extends.every(item => typeof item === 'string')
           ? descriptorRecord.extends as string[]
           : undefined
+        declaredPath = typeof descriptorRecord?.path === 'string' ? descriptorRecord.path : undefined
+        isArray = typeof descriptorRecord?.isArray === 'boolean' ? descriptorRecord.isArray : undefined
       }
     }
     else if (valueContainer === propertyContainer && key === propertyName) {
@@ -88,7 +99,16 @@ export function analyzeComponentProperty(component: unknown, propertyName: strin
       : declaredExtends?.includes('cc.Asset')
         ? 'asset'
         : inferComponentPropertyType(originalValue, propertyName, null) ?? 'unknown'
-  return { exists: true, type, availableProperties, originalValue, declaredType, declaredExtends }
+  return { exists: true, type, availableProperties, originalValue, declaredType, declaredExtends, declaredPath, isArray }
+}
+
+export function resolveComponentPropertyPath(componentIndex: number, propertyName: string, declaredPath?: string): string {
+  const path = declaredPath?.trim().replace(/^\.+/, '')
+  if (!path)
+    return `__comps__.${componentIndex}.${propertyName}`
+  if (path.startsWith('__comps__.'))
+    return path
+  return `__comps__.${componentIndex}.${path}`
 }
 
 export function inferComponentPropertyType(value: unknown, propertyName: string, context: PropertyTypeContext | null): string | null {
@@ -163,8 +183,11 @@ export function normalizeComponentPropertyType(rawType: string | undefined, valu
     'cc.node': 'node',
     'component': 'component',
     'spriteframe': 'spriteFrame',
+    'cc.spriteframe': 'spriteFrame',
     'prefab': 'prefab',
+    'cc.prefab': 'prefab',
     'asset': 'asset',
+    'cc.asset': 'asset',
     'nodearray': 'nodeArray',
     'nodeArray': 'nodeArray',
     'colorarray': 'colorArray',
@@ -177,6 +200,47 @@ export function normalizeComponentPropertyType(rawType: string | undefined, valu
   const lower = rawType.trim().toLowerCase()
   const camel = lower.replace(/[_-]([a-z])/g, (_match, letter: string) => letter.toUpperCase())
   return aliases[lower] || aliases[camel] || lower
+}
+
+export function resolveComponentAssetType(propertyName: string, propertyType: string, context: PropertyTypeContext & { declaredType?: string }): string {
+  if (context.type === 'asset' && context.declaredType)
+    return context.declaredType
+  if (propertyType === 'prefab')
+    return 'cc.Prefab'
+  if (propertyType === 'spriteFrame')
+    return 'cc.SpriteFrame'
+  if (propertyName.toLowerCase().includes('texture'))
+    return 'cc.Texture2D'
+  if (propertyName.toLowerCase().includes('material'))
+    return 'cc.Material'
+  if (propertyName.toLowerCase().includes('font'))
+    return 'cc.Font'
+  if (propertyName.toLowerCase().includes('clip'))
+    return 'cc.AudioClip'
+  return 'cc.Asset'
+}
+
+export function resolveCanonicalAssetReference(assetInfo: unknown, expectedType: string): CanonicalAssetReference | null {
+  const root = record(assetInfo)
+  if (!root)
+    return null
+
+  const rawSubAssets = root.subAssets
+  const subAssets = Array.isArray(rawSubAssets)
+    ? rawSubAssets.map(record).filter((value): value is Record<string, unknown> => value !== null)
+    : Object.values(record(rawSubAssets) ?? {}).map(record).filter((value): value is Record<string, unknown> => value !== null)
+  const candidates = [root, ...subAssets]
+  const matched = candidates.find((candidate) => {
+    const type = typeof candidate.type === 'string' ? candidate.type : undefined
+    const inheritedTypes = Array.isArray(candidate.extends) ? candidate.extends : []
+    return expectedType === 'cc.Asset' || type === expectedType || inheritedTypes.includes(expectedType)
+  })
+  if (!matched || typeof matched.uuid !== 'string' || !matched.uuid)
+    return null
+  return {
+    uuid: matched.uuid,
+    type: typeof matched.type === 'string' ? matched.type : undefined,
+  }
 }
 
 export function processComponentTypedValue(value: unknown, type: string): unknown {

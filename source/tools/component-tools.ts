@@ -2,7 +2,7 @@ import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 import type { ComponentPropertyVerification } from './component-mutation'
 import { requestAssetDb, requestScene } from '../editor-message'
 import { getNodePropertyRedirect, unwrapPropertyDumpValue, verifyComponentPropertyValue } from './component-mutation'
-import { analyzeComponentProperty, buildUnsupportedComponentPropertyTypeError, inferComponentPropertyType, isScriptComponent, normalizeComponentPropertyType, parseComponentColor, processComponentTypedValue } from './component-property'
+import { analyzeComponentProperty, buildUnsupportedComponentPropertyTypeError, inferComponentPropertyType, isScriptComponent, normalizeComponentPropertyType, parseComponentColor, processComponentTypedValue, resolveCanonicalAssetReference, resolveComponentAssetType, resolveComponentPropertyPath } from './component-property'
 import { componentMatchesType, describeComponent, extractComponentProperties, findComponentByType, findComponentIndexByType, getComponentSceneId, getComponentType, summarizeComponent } from './component-query'
 import { toolFailure } from './tool-response'
 
@@ -43,7 +43,7 @@ export class ComponentTools implements ToolExecutor {
       },
       {
         name: 'remove_component',
-        description: 'Remove a component from a node. componentType must be the component\'s classId (cid, i.e. the type field from getComponents), not the script name or class name. Use getComponents to get the correct cid.',
+        description: 'Remove a component from a node. Use the component instance uuid returned by get_components when available; type and cid are also accepted.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -53,7 +53,7 @@ export class ComponentTools implements ToolExecutor {
             },
             componentType: {
               type: 'string',
-              description: 'Component cid (type field from getComponents). Do NOT use script name or class name. Example: "cc.Sprite" or "9b4a7ueT9xD6aRE+AlOusy1"',
+              description: 'Component instance uuid, type, or cid returned by get_components. The instance uuid is required when removing cc.MissingScript without a cid.',
             },
           },
           required: ['nodeUuid', 'componentType'],
@@ -309,10 +309,7 @@ export class ComponentTools implements ToolExecutor {
       const allComponentsInfo = await this.getComponents(nodeUuid)
 
       if (allComponentsInfo.success && allComponentsInfo.data?.components) {
-        const existingComponent = allComponentsInfo.data.components.find((comp: unknown) => {
-          const compType = getComponentType(comp) ?? ''
-          return compType === effectiveComponentType
-        })
+        const existingComponent = allComponentsInfo.data.components.find((comp: unknown) => componentMatchesType(comp, effectiveComponentType))
         if (existingComponent) {
           resolve({
             success: true,
@@ -351,14 +348,7 @@ export class ComponentTools implements ToolExecutor {
             allComponentsInfo2 = await this.getComponents(nodeUuid)
 
             if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
-              addedComponent = allComponentsInfo2.data.components.find((comp: unknown) => {
-                const compType = getComponentType(comp) ?? ''
-                if (effectiveComponentType.startsWith('cc.')) {
-                  return compType === effectiveComponentType
-                    || compType.replace('cc.', '') === effectiveComponentType.replace('cc.', '')
-                }
-                return compType === effectiveComponentType
-              })
+              addedComponent = allComponentsInfo2.data.components.find((comp: unknown) => componentMatchesType(comp, effectiveComponentType))
 
               if (addedComponent) {
                 // 找到组件，验证成功
@@ -434,29 +424,38 @@ export class ComponentTools implements ToolExecutor {
         resolve({ success: false, error: `Failed to get components for node '${nodeUuid}': ${allComponentsInfo.error}` })
         return
       }
-      // 2. 只查找type字段等于componentType的组件（即cid）
-      const exists = allComponentsInfo.data.components.some((comp: unknown) => getComponentType(comp) === componentType)
-      if (!exists) {
-        resolve({ success: false, error: `Component cid '${componentType}' not found on node '${nodeUuid}'. 请用getComponents获取type字段（cid）作为componentType。` })
+      const component = allComponentsInfo.data.components.find((candidate: unknown) =>
+        getComponentSceneId(candidate) === componentType || componentMatchesType(candidate, componentType),
+      )
+      if (!component) {
+        resolve({ success: false, error: `Component '${componentType}' not found on node '${nodeUuid}'. Use component_query.get_components and pass its uuid, type, or cid.` })
         return
       }
-      // 3. 官方API直接移除
+      const componentUuid = getComponentSceneId(component)
+      const removalIdentity = componentUuid ?? getComponentType(component)
+      if (!removalIdentity) {
+        resolve({ success: false, error: `Component '${componentType}' has no removable uuid or type identity.` })
+        return
+      }
       try {
         await Editor.Message.request('scene', 'remove-component', {
           uuid: nodeUuid,
-          component: componentType,
+          component: removalIdentity,
         })
-        // 4. 再查一次确认是否移除
         const afterRemoveInfo = await this.getComponents(nodeUuid)
-        const stillExists = afterRemoveInfo.success && afterRemoveInfo.data?.components?.some((comp: unknown) => getComponentType(comp) === componentType)
+        const stillExists = afterRemoveInfo.success && afterRemoveInfo.data?.components?.some((candidate: unknown) =>
+          componentUuid
+            ? getComponentSceneId(candidate) === componentUuid
+            : componentMatchesType(candidate, componentType),
+        )
         if (stillExists) {
-          resolve({ success: false, error: `Component cid '${componentType}' was not removed from node '${nodeUuid}'.` })
+          resolve({ success: false, error: `Component '${componentType}' was not removed from node '${nodeUuid}'.` })
         }
         else {
           resolve({
             success: true,
-            message: `Component cid '${componentType}' removed successfully from node '${nodeUuid}'`,
-            data: { nodeUuid, componentType },
+            message: `Component '${componentType}' removed successfully from node '${nodeUuid}'`,
+            data: { nodeUuid, componentType: getComponentType(component), componentUuid },
           })
         }
       }
@@ -552,7 +551,7 @@ export class ComponentTools implements ToolExecutor {
         Editor.Message.request('scene', 'execute-scene-script', options).then((result: unknown) => {
           const data = isToolArguments(result) && isToolArguments(result.data) ? result.data : null
           if (isToolArguments(result) && result.success === true && data && Array.isArray(data.components)) {
-            const component = data.components.find(comp => getComponentType(comp) === componentType)
+            const component = data.components.find(comp => componentMatchesType(comp, componentType))
             if (component) {
               resolve({
                 success: true,
@@ -830,8 +829,11 @@ export class ComponentTools implements ToolExecutor {
             if (typeof value === 'string') {
               processedValue = { uuid: value }
             }
+            else if (isToolArguments(value) && typeof value.uuid === 'string') {
+              processedValue = { uuid: value.uuid }
+            }
             else {
-              throw new TypeError(`${propertyType} value must be a string UUID`)
+              throw new TypeError(`${propertyType} value must be a UUID string or an object with a string uuid field`)
             }
             break
           case 'nodeArray':
@@ -933,7 +935,7 @@ export class ComponentTools implements ToolExecutor {
         }
 
         // 构建正确的属性路径
-        const propertyPath = `__comps__.${rawComponentIndex}.${property}`
+        const propertyPath = resolveComponentPropertyPath(rawComponentIndex, property, propertyInfo.declaredPath)
 
         // 特殊处理资源类属性
         if (propertyType === 'asset' || propertyType === 'spriteFrame' || propertyType === 'prefab'
@@ -945,32 +947,34 @@ export class ComponentTools implements ToolExecutor {
             path: propertyPath,
           })
 
-          // Determine asset type based on property name
-          let assetType = 'cc.SpriteFrame' // default
-          if (property.toLowerCase().includes('texture')) {
-            assetType = 'cc.Texture2D'
+          const assetType = resolveComponentAssetType(property, propertyType, propertyInfo)
+          const requestedAssetUuid = isToolArguments(processedValue) && typeof processedValue.uuid === 'string'
+            ? processedValue.uuid
+            : String(value)
+          const assetInfo = await requestAssetDb('query-asset-info', requestedAssetUuid).catch(() => null)
+          if (!assetInfo) {
+            throw new Error(`Asset UUID '${requestedAssetUuid}' was not found by Cocos asset-db. Query the asset again after import/refresh and use the UUID returned by asset-db.`)
           }
-          else if (property.toLowerCase().includes('material')) {
-            assetType = 'cc.Material'
+          const canonicalAsset = resolveCanonicalAssetReference(assetInfo, assetType)
+          if (!canonicalAsset) {
+            const actualType = typeof assetInfo.type === 'string' ? assetInfo.type : 'unknown'
+            throw new Error(`Asset '${requestedAssetUuid}' is not compatible with ${assetType} (asset-db type: ${actualType}). Query the source asset with sub-assets included and use the matching sub-asset UUID.`)
           }
-          else if (property.toLowerCase().includes('font')) {
-            assetType = 'cc.Font'
-          }
-          else if (property.toLowerCase().includes('clip')) {
-            assetType = 'cc.AudioClip'
-          }
-          else if (propertyType === 'prefab') {
-            assetType = 'cc.Prefab'
-          }
+          processedValue = { uuid: canonicalAsset.uuid }
+          actualExpectedValue = processedValue
 
-          await requestScene('set-property', {
+          const changed = await requestScene('set-property', {
             uuid: nodeUuid,
             path: propertyPath,
             dump: {
               value: processedValue,
               type: assetType,
+              ...(propertyInfo.isArray === undefined ? {} : { isArray: propertyInfo.isArray }),
             },
           })
+          if (!changed) {
+            throw new Error(`Cocos Editor rejected the asset reference write for '${propertyPath}'. Verify that '${canonicalAsset.uuid}' is the UUID of the expected sub-asset (${assetType}), not the source image UUID.`)
+          }
         }
         else if (componentType === 'cc.UITransform' && (property === '_contentSize' || property === 'contentSize')) {
           const size = isToolArguments(value) ? value : {}
@@ -1253,7 +1257,26 @@ export class ComponentTools implements ToolExecutor {
         // Step 5: 等待Editor完成更新，然后验证设置结果
         await new Promise(resolve => setTimeout(resolve, 200)) // 等待200ms让Editor完成更新
 
-        const verification = await this.verifyPropertyChange(nodeUuid, componentType, property, originalValue, actualExpectedValue)
+        const strictReferenceVerification = propertyInfo.type === 'asset'
+          || propertyType === 'asset'
+          || propertyType === 'spriteFrame'
+          || propertyType === 'prefab'
+        const verification = await this.verifyPropertyChange(nodeUuid, componentType, property, originalValue, actualExpectedValue, strictReferenceVerification)
+
+        if (strictReferenceVerification && !verification.verified) {
+          resolve(toolFailure(`Asset reference verification failed for ${componentType}.${property}.`, {
+            data: {
+              nodeUuid,
+              componentType,
+              property,
+              expectedValue: actualExpectedValue,
+              actualValue: verification.actualValue,
+              changeVerified: false,
+            },
+            instruction: 'Query the asset first and retry with the exact sub-asset UUID returned by Cocos. For an imported image, use its SpriteFrame sub-asset UUID rather than the source image UUID.',
+          }))
+          return
+        }
 
         resolve({
           success: true,
@@ -1394,7 +1417,7 @@ export class ComponentTools implements ToolExecutor {
     }
   }
 
-  private async verifyPropertyChange(nodeUuid: string, componentType: string, property: string, originalValue: unknown, expectedValue: unknown): Promise<ComponentPropertyVerification> {
+  private async verifyPropertyChange(nodeUuid: string, componentType: string, property: string, originalValue: unknown, expectedValue: unknown, strictReference: boolean = false): Promise<ComponentPropertyVerification> {
     console.log(`[verifyPropertyChange] Starting verification for ${componentType}.${property}`)
     console.log(`[verifyPropertyChange] Expected value:`, JSON.stringify(expectedValue))
     console.log(`[verifyPropertyChange] Original value:`, JSON.stringify(originalValue))
@@ -1409,7 +1432,7 @@ export class ComponentTools implements ToolExecutor {
         const propertyData = componentInfo.data.properties?.[property]
 
         const actualValue = unwrapPropertyDumpValue(propertyData)
-        const verified = verifyComponentPropertyValue(actualValue, expectedValue, originalValue)
+        const verified = verifyComponentPropertyValue(actualValue, expectedValue, originalValue, strictReference)
 
         const result = {
           verified,

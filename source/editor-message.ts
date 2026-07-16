@@ -62,6 +62,7 @@ export interface AssetDbAssetInfo {
 interface SceneRequestMap {
   'query-node': { args: [uuid: string], result: SceneNodePropertyDump }
   'query-node-tree': { args: [], result: SceneNodeDump }
+  'query-nodes-by-asset-uuid': { args: [assetUuid: string], result: string[] }
   'query-is-ready': { args: [], result: boolean }
   'query-dirty': { args: [], result: boolean }
   'query-current-scene': { args: [], result: CurrentSceneInfo | null }
@@ -69,8 +70,10 @@ interface SceneRequestMap {
 }
 
 interface AssetDbRequestMap {
+  'open-asset': { args: [urlOrUuid: string], result: void }
   'query-asset-info': { args: [urlOrUuid: string], result: AssetDbAssetInfo | null }
   'query-assets': { args: [options: { pattern: string }], result: AssetDbAssetInfo[] }
+  'query-path': { args: [urlOrUuid: string], result: string | null }
   'query-uuid': { args: [url: string], result: string | null }
 }
 

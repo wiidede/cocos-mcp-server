@@ -23,6 +23,7 @@ describe('component mutation rules', () => {
   it('verifies dump values and compatible references', () => {
     expect(unwrapPropertyDumpValue({ value: 42, type: 'Number' })).toBe(42)
     expect(verifyComponentPropertyValue({ value: { uuid: 'component-1' } }, { uuid: 'component-1' }, null)).toBe(true)
+    expect(verifyComponentPropertyValue({ value: { uuid: 'asset-2' } }, { uuid: 'asset-1' }, null, true)).toBe(false)
     expect(verifyComponentPropertyValue('42', 42, 0)).toBe(true)
     expect(verifyComponentPropertyValue({ x: 1 }, { x: 2 }, null)).toBe(false)
   })

@@ -25,10 +25,15 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 - 先查询再修改：场景用 `scene_hierarchy`，节点用 `node_query`，组件用 `component_query`，资源用 `asset_query` 或 `project_query`。
 - 写操作使用 UUID、`nodeUuid`、`assetUuid` 和 `prefabPath`；名称仅适合搜索，且不保证唯一。
 - 不要猜 Cocos Editor message 名称；只调用 `tools/list` 暴露的工具和 action。
+- `scene_execution_control.execute_scene_script` 只能调用扩展已注册 scene script 的导出方法，不能执行临时 JavaScript；资源查询、日志读取和场景修改应使用对应的专用工具。
+- `scene_undo_manage.begin` 必须通过 `nodeUuid` 或 `nodeUuids` 传入所有需要捕获状态的目标节点；可用 `label` 命名记录，并保存 `data.undoId`，随后传给 `end` 或 `cancel` 配对关闭。
+- 资源引用属性应传目标子资源 UUID（例如 SpriteFrame UUID），不要传源图片 UUID；写入失败或验证失败时不要保存场景。
 - 创建或打开场景、导入资源后，先确认场景和资源已就绪，再继续使用新 UUID。
-- 删除组件前，先通过 `component_query.get_components` 获取实际 `componentType` 或 `cid`。
+- 删除组件前，先通过 `component_query.get_components` 获取组件实例 `uuid`、`componentType` 或 `cid`；删除无 cid 的 `cc.MissingScript` 时使用实例 `uuid`。
 - 预制体、资源引用和按钮事件操作前，先读取目标节点及组件状态。
+- `prefab_instance.instantiate` 和 `restore` 只有在 `query-nodes-by-asset-uuid` 回读确认关联后才算成功；`restore` 不用于将任意普通节点转换为 Prefab 实例。
 - 每次调用检查 `success`；失败时读取 `error` 和 `instruction`，重新查询状态后再重试。
+- 扩展重新构建或重载后应重新连接 MCP 客户端以刷新 `tools/list`；现有会话可能继续使用旧的工具 schema。
 
 ## 省 Token 规则
 
@@ -55,7 +60,7 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 ### 删除组件
 
 1. `component_query.get_components` 查询节点上的组件。
-2. 从结果中选择要删除的实际 `componentType` 或 `cid`。
+2. 从结果中选择要删除的组件实例 `uuid`（优先）、`componentType` 或 `cid`。
 3. `component_manage.remove` 删除组件。
 
 ### 绑定 Button 点击事件

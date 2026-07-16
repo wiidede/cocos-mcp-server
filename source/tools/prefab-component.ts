@@ -1,5 +1,5 @@
 import type { PrefabReferenceContext } from './prefab-property'
-import { asPrefabRecord, createColor, createSize, createVec2, getComponentPropertyValue } from './prefab-format'
+import { asPrefabRecord, createColor, createSize, createVec2, getComponentPropertyValue, isSerializedScriptClassId } from './prefab-format'
 import { serializeComponentProperty } from './prefab-property'
 
 export function extractPrefabComponents(nodeData: unknown): Record<string, unknown>[] {
@@ -112,9 +112,27 @@ function dumpedProperty(properties: Record<string, unknown> | null, name: string
   return property?.value ?? fallback
 }
 
+export function getPrefabComponentType(componentData: unknown): string {
+  const source = asPrefabRecord(componentData)
+  const cid = typeof source?.cid === 'string' && source.cid.length > 0 ? source.cid : null
+  const dumpType = typeof source?.__type__ === 'string' ? source.__type__ : null
+  const displayType = typeof source?.type === 'string' ? source.type : null
+  const value = asPrefabRecord(source?.value)
+  const valueCid = typeof value?.cid === 'string' && value.cid.length > 0 ? value.cid : null
+  const valueType = typeof value?.__type__ === 'string' ? value.__type__ : null
+
+  if (cid ?? valueCid)
+    return cid ?? valueCid ?? 'cc.Component'
+  const scriptClassId = [dumpType, valueType, displayType].find(type => type && isSerializedScriptClassId(type))
+  if (scriptClassId)
+    return scriptClassId
+  const serializedType = [dumpType, valueType].find(type => type && !['cc.Script', 'cc.Component'].includes(type))
+  return serializedType ?? displayType ?? dumpType ?? valueType ?? 'cc.Component'
+}
+
 export function createPrefabComponent(componentData: unknown, nodeIndex: number, context?: PrefabReferenceContext): Record<string, unknown> {
   const source = asPrefabRecord(componentData) ?? {}
-  const componentType = typeof source.type === 'string' ? source.type : typeof source.__type__ === 'string' ? source.__type__ : 'cc.Component'
+  const componentType = getPrefabComponentType(source)
   const properties = asPrefabRecord(source.properties)
   const component: Record<string, unknown> = {
     __type__: componentType,

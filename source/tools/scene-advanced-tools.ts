@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 import { requestEditor, requestScene } from '../editor-message'
+import { verifyPrefabInstanceLink } from './prefab-instance'
 import { toolFailure } from './tool-response'
 
 type ToolArguments = Record<string, unknown>
@@ -212,17 +213,17 @@ export class SceneAdvancedTools implements ToolExecutor {
       },
       {
         name: 'execute_scene_script',
-        description: 'Execute scene script method',
+        description: 'Execute a method exported by a registered extension scene script. This does not evaluate arbitrary JavaScript.',
         inputSchema: {
           type: 'object',
           properties: {
             name: {
               type: 'string',
-              description: 'Plugin name',
+              description: 'Extension package name that contributes the scene script (for this extension: cocos-mcp-server)',
             },
             method: {
               type: 'string',
-              description: 'Method name',
+              description: 'Method exported from the registered scene script methods object',
             },
             args: {
               type: 'array',
@@ -251,16 +252,29 @@ export class SceneAdvancedTools implements ToolExecutor {
       },
       {
         name: 'begin_undo_recording',
-        description: 'Begin recording undo data',
+        description: 'Begin an explicit undo record for one or more target nodes. The UUIDs identify every object whose state must be captured, not an arbitrary anchor.',
         inputSchema: {
           type: 'object',
           properties: {
             nodeUuid: {
               type: 'string',
-              description: 'Node UUID to record',
+              description: 'Single target node UUID (compatibility form)',
+            },
+            nodeUuids: {
+              type: 'array',
+              items: { type: 'string' },
+              minItems: 1,
+              description: 'All target node UUIDs whose state must be captured',
+            },
+            label: {
+              type: 'string',
+              description: 'Undo menu label (mapped to Cocos undo tag)',
             },
           },
-          required: ['nodeUuid'],
+          anyOf: [
+            { required: ['nodeUuid'] },
+            { required: ['nodeUuids'] },
+          ],
         },
       },
       {
@@ -428,7 +442,19 @@ export class SceneAdvancedTools implements ToolExecutor {
       case 'scene_snapshot_abort':
         return this.sceneSnapshotAbort()
       case 'begin_undo_recording':
-        return typeof args.nodeUuid === 'string' ? this.beginUndoRecording(args.nodeUuid) : toolFailure('begin_undo_recording requires nodeUuid')
+        if (args.nodeUuid !== undefined && args.nodeUuids !== undefined) {
+          return toolFailure('begin_undo_recording accepts either nodeUuid or nodeUuids, not both')
+        }
+        if (args.label !== undefined && typeof args.label !== 'string') {
+          return toolFailure('begin_undo_recording label must be a string when provided')
+        }
+        if (typeof args.nodeUuid === 'string') {
+          return this.beginUndoRecording(args.nodeUuid, args.label)
+        }
+        if (Array.isArray(args.nodeUuids) && args.nodeUuids.length > 0 && args.nodeUuids.every(uuid => typeof uuid === 'string')) {
+          return this.beginUndoRecording(args.nodeUuids, args.label)
+        }
+        return toolFailure('begin_undo_recording requires nodeUuid or a non-empty nodeUuids array')
       case 'end_undo_recording':
         return typeof args.undoId === 'string' ? this.endUndoRecording(args.undoId) : toolFailure('end_undo_recording requires undoId')
       case 'cancel_undo_recording':
@@ -591,16 +617,18 @@ export class SceneAdvancedTools implements ToolExecutor {
   }
 
   private async restorePrefab(nodeUuid: string, assetUuid: string): Promise<ToolResponse> {
-    return new Promise((resolve) => {
-      requestEditor('scene', 'restore-prefab', nodeUuid, assetUuid).then(() => {
-        resolve({
-          success: true,
-          message: 'Prefab restored successfully',
-        })
-      }).catch((err: Error) => {
-        resolve({ success: false, error: err.message })
-      })
-    })
+    try {
+      const restored = await requestEditor('scene', 'restore-prefab', nodeUuid, assetUuid)
+      if (restored !== true)
+        return { success: false, error: 'Cocos restore-prefab returned false; no prefab association was restored.', data: { nodeUuid, assetUuid, restored, prefabLinked: false } }
+      const prefabLinked = await verifyPrefabInstanceLink(nodeUuid, assetUuid)
+      return prefabLinked
+        ? { success: true, message: 'Prefab restored successfully', data: { nodeUuid, assetUuid, restored: true, prefabLinked: true } }
+        : { success: false, error: 'Cocos restore-prefab returned true, but the prefab association could not be verified.', data: { nodeUuid, assetUuid, restored: true, prefabLinked: false } }
+    }
+    catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   private async executeComponentMethod(uuid: string, name: string, args: unknown[] = []): Promise<ToolResponse> {
@@ -666,13 +694,23 @@ export class SceneAdvancedTools implements ToolExecutor {
     })
   }
 
-  private async beginUndoRecording(nodeUuid: string): Promise<ToolResponse> {
+  private async beginUndoRecording(nodeUuids: string | string[], label?: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
-      Editor.Message.request('scene', 'begin-recording', nodeUuid).then((undoId: string) => {
+      const options = {
+        auto: false,
+        ...(label ? { tag: label } : {}),
+      }
+      Editor.Message.request('scene', 'begin-recording', nodeUuids, options).then((undoId: unknown) => {
+        if (typeof undoId !== 'string' || !undoId) {
+          resolve(toolFailure('Cocos Editor did not return a valid undoId from begin-recording'))
+          return
+        }
         resolve({
           success: true,
           data: {
             undoId,
+            nodeUuids: typeof nodeUuids === 'string' ? [nodeUuids] : nodeUuids,
+            label,
             message: 'Undo recording started',
           },
         })

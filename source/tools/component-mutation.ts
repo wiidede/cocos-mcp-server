@@ -67,7 +67,7 @@ export function unwrapPropertyDumpValue(value: unknown): unknown {
   return (value as Record<string, unknown>).value
 }
 
-export function verifyComponentPropertyValue(actualValue: unknown, expectedValue: unknown, originalValue: unknown): boolean {
+export function verifyComponentPropertyValue(actualValue: unknown, expectedValue: unknown, originalValue: unknown, strictReference: boolean = false): boolean {
   const expectedRecord = typeof expectedValue === 'object' && expectedValue !== null
     ? expectedValue as Record<string, unknown>
     : null
@@ -77,6 +77,8 @@ export function verifyComponentPropertyValue(actualValue: unknown, expectedValue
     const expectedReference = unwrapComponentReference(expectedValue)
     if (actualReference === expectedReference && expectedReference !== '')
       return true
+    if (strictReference)
+      return false
     return isComponentReference(actualValue) && JSON.stringify(actualValue) !== JSON.stringify(originalValue)
   }
 

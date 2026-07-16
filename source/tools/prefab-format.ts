@@ -45,6 +45,11 @@ export function uuidToCompressedId(uuid: string): string {
   return result
 }
 
+export function isSerializedScriptClassId(value: string): boolean {
+  return /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(value)
+    || /^[\da-f]{5}[A-Z0-9+/]{18}$/i.test(value)
+}
+
 export function validatePrefabFormat(prefabData: unknown): PrefabValidationResult {
   const issues: string[] = []
   if (!Array.isArray(prefabData))
@@ -59,11 +64,18 @@ export function validatePrefabFormat(prefabData: unknown): PrefabValidationResul
   let nodeCount = 0
   let componentCount = 0
   for (const item of prefabData) {
-    const type = asPrefabRecord(item)?.__type__
-    if (type === 'cc.Node')
+    const record = asPrefabRecord(item)
+    const type = record?.__type__
+    if (type === 'cc.Node') {
       nodeCount++
-    else if (typeof type === 'string' && type.includes('cc.'))
+    }
+    else if (typeof type === 'string' && asPrefabRecord(record?.node)?.__id__ !== undefined) {
       componentCount++
+      if (type === 'cc.MissingScript')
+        issues.push('预制体包含 cc.MissingScript 组件')
+      else if (!type.startsWith('cc.') && !isSerializedScriptClassId(type))
+        issues.push(`自定义脚本组件必须使用 Cocos class ID 序列化，不能使用类名 '${type}'`)
+    }
   }
   if (nodeCount === 0)
     issues.push('预制体必须包含至少一个节点')

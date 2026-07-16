@@ -77,6 +77,7 @@ const PROP = {
 
 const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   uuid: PROP.string('UUID'),
+  undoId: PROP.string('Undo recording ID returned by scene_undo_manage.begin'),
   uuids: {
     oneOf: [
       { type: 'string' },
@@ -85,6 +86,7 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
     description: 'Single UUID or UUID list',
   },
   nodeUuid: PROP.string('Node UUID'),
+  nodeUuids: PROP.array('Target node UUIDs', { type: 'string' }, { minItems: 1 }),
   parentUuid: PROP.string('Parent node UUID'),
   newParentUuid: PROP.string('New parent node UUID'),
   name: PROP.string('Name'),
@@ -129,6 +131,7 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   componentType: PROP.string('Component type or cid'),
   scriptPath: PROP.string('Script path'),
   method: PROP.string('Method name'),
+  label: PROP.string('User-visible operation label'),
   args: PROP.array('Method arguments', {}),
   tab: PROP.string('Preferences tab or panel tab'),
   category: PROP.string('Category'),
@@ -268,7 +271,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_execution_control',
-        'Run registered scene-side operations and readiness checks. Only call scene methods that are registered by Cocos or this extension. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
+        'Run registered scene-side operations and readiness checks. execute_scene_script cannot evaluate JavaScript: name must identify an extension with a contributed scene script, and method must be exported from that scene script methods object. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
         ['execute_component_method', 'execute_scene_script', 'restore_prefab', 'soft_reload', 'query_ready', 'query_dirty'],
         ['uuid', 'nodeUuid', 'assetUuid', 'name', 'method', 'args'],
         args => this.routeLegacyAction('scene_execution_control', {
@@ -341,14 +344,20 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_undo_manage',
-        'Manage editor undo records for multi-step scene edits. Always end or cancel an opened record. Actions: begin, end, cancel.',
+        'Manage explicit editor undo records for multi-step scene edits. begin requires nodeUuid or nodeUuids containing every target whose state must be captured; label becomes the Undo menu tag. Save data.undoId and pass it to end or cancel. Actions: begin, end, cancel.',
         ['begin', 'end', 'cancel'],
-        ['nodeUuid', 'uuid'],
+        ['nodeUuid', 'nodeUuids', 'label', 'undoId'],
         args => this.routeLegacyAction('scene_undo_manage', {
           begin: 'sceneAdvanced_begin_undo_recording',
           end: 'sceneAdvanced_end_undo_recording',
           cancel: 'sceneAdvanced_cancel_undo_recording',
         }, args),
+        [
+          { action: 'begin', required: ['nodeUuid'] },
+          { action: 'begin', required: ['nodeUuids'] },
+          { action: 'end', required: ['undoId'] },
+          { action: 'cancel', required: ['undoId'] },
+        ],
       ),
       this.createTool(
         'node_query',
@@ -431,7 +440,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'component_manage',
-        'Add or remove components on a node. Before remove, call component_query.get_components and use the returned componentType or cid. Actions: add, remove.',
+        'Add or remove components on a node. Before remove, call component_query.get_components and prefer the returned component instance uuid; type and cid are also accepted. Actions: add, remove.',
         ['add', 'remove'],
         ['nodeUuid', 'componentType'],
         args => this.routeLegacyAction('component_manage', {
@@ -509,7 +518,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_instance',
-        'Instantiate prefabs or revert/restore prefab instances. Use prefab_browse/asset_query for prefab identity and node_query for instance UUIDs. Actions: instantiate, revert, restore_node, restore.',
+        'Instantiate prefabs or revert/restore existing prefab instances. instantiate and restore only succeed after query-nodes-by-asset-uuid verifies the association. restore is not a generic conversion from an ordinary node. Actions: instantiate, revert, restore_node, restore.',
         ['instantiate', 'revert', 'restore_node', 'restore'],
         ['prefabPath', 'parentUuid', 'position', 'nodeUuid', 'assetUuid'],
         args => this.routeLegacyAction('prefab_instance', {
@@ -692,7 +701,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_execute',
-        'Execute debugging scripts in the editor context. Use sparingly; prefer dedicated tools for normal scene/asset operations. Actions: script.',
+        'Legacy compatibility endpoint. Arbitrary JavaScript execution is not supported; script returns a failure with guidance to use dedicated tools or a registered scene script method. Actions: script.',
         ['script'],
         ['script'],
         args => this.routeLegacyAction('debug_execute', {
@@ -834,7 +843,17 @@ export class UnifiedTools {
     actions: string[],
     propertyKeys: string[],
     execute: (args: ToolArguments) => Promise<ToolResponse>,
+    actionRequirements: Record<string, string[]> | Array<{ action: string, required: string[] }> = {},
   ): RegisteredTool {
+    const requirements = Array.isArray(actionRequirements)
+      ? actionRequirements
+      : Object.entries(actionRequirements).map(([action, required]) => ({ action, required }))
+    const anyOf = requirements.map(({ action, required }) => ({
+      properties: {
+        action: { type: 'string', enum: [action] },
+      },
+      required: ['action', ...required],
+    }))
     return {
       name,
       description,
@@ -849,6 +868,7 @@ export class UnifiedTools {
           ...pickProps(propertyKeys),
         },
         required: ['action'],
+        ...(anyOf.length === 0 ? {} : { anyOf }),
       },
       execute,
     }
@@ -901,6 +921,14 @@ export class UnifiedTools {
   private getFailureInstruction(toolName: string, action: string, error: string, args: ToolArguments): string | undefined {
     const lowerError = error.toLowerCase()
 
+    if (toolName === 'scene_execution_control' && action === 'execute_scene_script') {
+      return 'execute_scene_script cannot run arbitrary JavaScript. Use name="cocos-mcp-server" with a method exported by source/scene.ts, call a dedicated MCP tool, or add and register a new scene method in the extension before calling it.'
+    }
+
+    if (toolName === 'debug_execute') {
+      return 'Arbitrary Editor or scene JavaScript execution is not supported. Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or scene_execution_control.execute_scene_script for an already registered scene method.'
+    }
+
     if (lowerError.includes('requires') && lowerError.includes('uuid')) {
       return 'Query the target first with node_query or scene_hierarchy, then retry with the returned UUID.'
     }
@@ -911,9 +939,9 @@ export class UnifiedTools {
 
     if (toolName.startsWith('component') || lowerError.includes('component')) {
       if (lowerError.includes('not found') || lowerError.includes('type') || lowerError.includes('cid') || lowerError.includes('verify')) {
-        return 'Call component_query.get_components with the nodeUuid, then retry using the returned componentType or cid. Use component_available.list only when adding a new component.'
+        return 'Call component_query.get_components with the nodeUuid, then retry using the returned component instance uuid, type, or cid. Prefer uuid for removal; use component_available.list only when adding a new component.'
       }
-      return 'Call component_query.get_components first to confirm the nodeUuid, componentType/cid, and property names before retrying.'
+      return 'Call component_query.get_components first to confirm the nodeUuid, component instance uuid/type/cid, and property names before retrying.'
     }
 
     if (toolName.startsWith('prefab') || lowerError.includes('prefab') || lowerError.includes('预制体')) {
