@@ -80,6 +80,36 @@ describe('component property values', () => {
     expect(resolveCanonicalAssetReference({ uuid: 'image-1', type: 'cc.ImageAsset' }, 'cc.SpriteFrame')).toBeNull()
   })
 
+  it('uses declared value types before inferring the JSON shape', () => {
+    const result = analyzeComponentProperty({
+      value: {
+        size: {
+          value: { x: 1, y: 1, z: 1 },
+          type: 'cc.Vec3',
+        },
+        sharedMaterials: {
+          value: [],
+          type: 'cc.Material',
+          extends: ['cc.Asset'],
+          isArray: true,
+        },
+      },
+    }, 'size')
+
+    expect(result).toMatchObject({ type: 'vec3', declaredType: 'cc.Vec3' })
+    expect(analyzeComponentProperty({
+      value: {
+        sharedMaterials: {
+          value: [],
+          type: 'cc.Material',
+          extends: ['cc.Asset'],
+          isArray: true,
+        },
+      },
+    }, 'sharedMaterials')).toMatchObject({ type: 'asset', isArray: true })
+    expect(normalizeComponentPropertyType('array', null)).toBe('array')
+    expect(normalizeComponentPropertyType('assetArray', null)).toBe('assetArray')
+  })
   it('normalizes component names and matches script components exactly', () => {
     expect(normalizeComponentName({ value: { value: 'Player<MoveScript>' } })).toBe('Player<MoveScript>')
     expect(isScriptComponent({ name: 'Player<MoveScript>' }, 'MoveScript')).toBe(true)

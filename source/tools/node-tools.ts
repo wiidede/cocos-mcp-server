@@ -26,6 +26,9 @@ interface CreateNodeInput extends ToolArguments {
   keepWorldTransform?: boolean
   siblingIndex?: number
   initialTransform?: Omit<NodeTransformInput, 'uuid'>
+  position?: unknown
+  rotation?: unknown
+  scale?: unknown
 }
 
 function isToolArguments(value: unknown): value is ToolArguments {
@@ -112,7 +115,22 @@ export class NodeTools implements ToolExecutor {
                   },
                 },
               },
-              description: 'Initial transform to apply to the created node',
+              description: 'Initial transform to apply to the created node. The top-level position, rotation, and scale fields are equivalent aliases retained for direct calls.',
+            },
+            position: {
+              type: 'object',
+              properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } },
+              description: 'Initial position alias for initialTransform.position.',
+            },
+            rotation: {
+              type: 'object',
+              properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } },
+              description: 'Initial Euler rotation alias for initialTransform.rotation.',
+            },
+            scale: {
+              type: 'object',
+              properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } },
+              description: 'Initial scale alias for initialTransform.scale.',
             },
           },
           required: ['name'],
@@ -477,14 +495,17 @@ export class NodeTools implements ToolExecutor {
         }
 
         // 设置初始变换（如果提供的话）
-        if (args.initialTransform && uuid) {
+        const initialTransform = args.initialTransform ?? ((args.position !== undefined || args.rotation !== undefined || args.scale !== undefined)
+          ? { position: args.position, rotation: args.rotation, scale: args.scale }
+          : undefined)
+        if (initialTransform && uuid) {
           try {
             await new Promise(resolve => setTimeout(resolve, 150)) // 等待节点和组件创建完成
             await this.setNodeTransform({
               uuid,
-              position: args.initialTransform.position,
-              rotation: args.initialTransform.rotation,
-              scale: args.initialTransform.scale,
+              position: initialTransform.position,
+              rotation: initialTransform.rotation,
+              scale: initialTransform.scale,
             })
             console.log('Initial transform applied successfully')
           }

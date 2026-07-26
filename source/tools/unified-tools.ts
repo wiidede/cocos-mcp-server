@@ -23,11 +23,23 @@ interface ToolInfoProvider {
   getToolDefinitions?: () => ToolDefinition[]
 }
 
-type RegisteredTool = ToolDefinition & {
-  execute: (args: ToolArguments) => Promise<ToolResponse>
+type ToolArguments = Record<string, unknown>
+
+interface ActionSpec {
+  name: string
+  description: string
+  properties?: string[]
+  required?: string[]
+  requiredAnyOf?: string[][]
+  example?: Record<string, unknown>
+  status?: 'supported' | 'deprecated' | 'unsupported'
+  unsupportedReason?: string
 }
 
-type ToolArguments = Record<string, unknown>
+type RegisteredTool = ToolDefinition & {
+  execute: (args: ToolArguments) => Promise<ToolResponse>
+  actionSpecs?: ActionSpec[]
+}
 
 type LegacyPrefix
   = | 'sceneAdvanced'
@@ -82,8 +94,9 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
     oneOf: [
       { type: 'string' },
       { type: 'array', items: { type: 'string' } },
+      { type: 'null' },
     ],
-    description: 'Single UUID or UUID list',
+    description: 'Single UUID, UUID list, or null when the action supports an all-targets operation',
   },
   nodeUuid: PROP.string('Node UUID'),
   nodeUuids: PROP.array('Target node UUIDs', { type: 'string' }, { minItems: 1 }),
@@ -158,6 +171,8 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   visible: PROP.boolean('Visibility flag'),
   includeMetadata: PROP.boolean('Include metadata', { default: true }),
   includeProperties: PROP.boolean('Include full property tree', { default: false }),
+  components: PROP.array('Component type names to add when creating the node', { type: 'string' }),
+  initialTransform: PROP.object('Initial position, rotation, and scale to apply after node creation'),
   autoCreateCanvas: PROP.boolean('Auto-create a Canvas node after scene is created', { default: false }),
   is2D: PROP.boolean('Whether to use 2D view mode'),
   is3D: PROP.boolean('Whether to use 3D icon mode'),
@@ -227,7 +242,7 @@ export class UnifiedTools {
   }
 
   public getTools(): ToolDefinition[] {
-    return this.tools.map(({ execute, ...tool }) => tool)
+    return this.tools.map(({ execute, actionSpecs: _actionSpecs, ...tool }) => tool)
   }
 
   public async execute(name: string, args: unknown): Promise<ToolResponse> {
@@ -240,16 +255,17 @@ export class UnifiedTools {
         instruction: 'Call tools/list or tool_registry.describe, then retry with a JSON object containing an action.',
       })
     }
-    return tool.execute(args)
+    const contractFailure = this.getActionContractFailure(name, tool.actionSpecs, args)
+    return contractFailure ?? tool.execute(args)
   }
 
   private buildTools(): RegisteredTool[] {
     return [
       this.createTool(
         'scene_management',
-        'Manage scene files and lifecycle. Query current scene before writes; save after structural changes when persistence is required. Actions: get_current, list, open, save, create, save_as, close.',
+        'Manage scene files and lifecycle. Query current scene before writes; save after structural changes when persistence is required. `open` requires `scenePath` (for example `db://assets/scenes/Main.scene`); `path` is not accepted by this action. Opening the already-current scene is a Cocos no-op and does not reload externally edited files—use scene_execution_control.soft_reload instead. Actions: get_current, list, open, save, create, save_as, close.',
         ['get_current', 'list', 'open', 'save', 'create', 'save_as', 'close'],
-        ['scenePath', 'sceneName', 'savePath', 'path', 'autoCreateCanvas'],
+        ['scenePath', 'sceneName', 'savePath', 'autoCreateCanvas'],
         args => this.routeLegacyAction('scene_management', {
           get_current: 'scene_get_current_scene',
           list: 'scene_get_scene_list',
@@ -259,6 +275,16 @@ export class UnifiedTools {
           save_as: 'scene_save_scene_as',
           close: 'scene_close_scene',
         }, args),
+        {},
+        [
+          { name: 'get_current', description: 'Get the currently open scene.' },
+          { name: 'list', description: 'List project scenes.' },
+          { name: 'open', description: 'Open a scene by asset URL.', properties: ['scenePath'], required: ['scenePath'], example: { action: 'open', scenePath: 'db://assets/scenes/Main.scene' } },
+          { name: 'save', description: 'Save the current scene.' },
+          { name: 'create', description: 'Create a scene at savePath. sceneName is optional and defaults to the filename in savePath.', properties: ['sceneName', 'savePath', 'autoCreateCanvas'], required: ['savePath'], example: { action: 'create', savePath: 'db://assets/scenes/Main.scene', sceneName: 'Main', autoCreateCanvas: true } },
+          { name: 'save_as', description: 'Save the current scene at a new path.', properties: ['savePath'], required: ['savePath'] },
+          { name: 'close', description: 'Close the current scene.' },
+        ],
       ),
       this.createTool(
         'scene_hierarchy',
@@ -268,6 +294,10 @@ export class UnifiedTools {
         args => this.routeLegacyAction('scene_hierarchy', {
           get: 'scene_get_scene_hierarchy',
         }, args),
+        {},
+        [
+          { name: 'get', description: 'Read the scene hierarchy.', properties: ['includeComponents'], example: { action: 'get', includeComponents: true } },
+        ],
       ),
       this.createTool(
         'scene_execution_control',
@@ -282,13 +312,14 @@ export class UnifiedTools {
           query_ready: 'sceneAdvanced_query_scene_ready',
           query_dirty: 'sceneAdvanced_query_scene_dirty',
         }, args),
+        {},
         [
-          { action: 'execute_component_method', required: ['uuid', 'name'] },
-          { action: 'execute_scene_script', required: ['name', 'method'] },
-          { action: 'restore_prefab', required: ['nodeUuid', 'assetUuid'] },
-          { action: 'soft_reload', required: [] },
-          { action: 'query_ready', required: [] },
-          { action: 'query_dirty', required: [] },
+          { name: 'execute_component_method', description: 'Run a registered method on a component instance.', properties: ['uuid', 'name', 'args'], required: ['uuid', 'name'] },
+          { name: 'execute_scene_script', description: 'Run a registered extension scene method; arbitrary JavaScript is not allowed.', properties: ['name', 'method', 'args'], required: ['name', 'method'] },
+          { name: 'restore_prefab', description: 'Restore a prefab instance via scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
+          { name: 'soft_reload', description: 'Soft-reload the current scene.' },
+          { name: 'query_ready', description: 'Check whether the scene is ready for operations.' },
+          { name: 'query_dirty', description: 'Check whether the scene has unsaved changes.' },
         ],
       ),
       this.createTool(
@@ -300,6 +331,11 @@ export class UnifiedTools {
           create: 'sceneAdvanced_scene_snapshot',
           abort: 'sceneAdvanced_scene_snapshot_abort',
         }, args),
+        {},
+        [
+          { name: 'create', description: 'Create a scene snapshot before a risky edit.' },
+          { name: 'abort', description: 'Abort and restore the active scene snapshot.' },
+        ],
       ),
       this.createTool(
         'scene_query',
@@ -313,6 +349,14 @@ export class UnifiedTools {
           component_has_script: 'sceneAdvanced_query_component_has_script',
           get_info: 'sceneAdvanced_query_scene_info',
         }, args),
+        {},
+        [
+          { name: 'classes', description: 'List scene classes, optionally filtered by base class.', properties: ['extends'] },
+          { name: 'components', description: 'List scene components.' },
+          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes referencing an asset.', properties: ['assetUuid'], required: ['assetUuid'] },
+          { name: 'component_has_script', description: 'Check whether a component has a script class.', properties: ['className'], required: ['className'] },
+          { name: 'get_info', description: 'Get scene information.' },
+        ],
       ),
       this.createTool(
         'scene_view_control',
@@ -332,6 +376,20 @@ export class UnifiedTools {
           align_view_with_node: 'sceneView_align_view_with_node',
           reset: 'sceneView_reset_scene_view',
         }, args),
+        {},
+        [
+          { name: 'change_gizmo_tool', description: 'Change the active gizmo tool.', properties: ['name'], required: ['name'], example: { action: 'change_gizmo_tool', name: 'position' } },
+          { name: 'change_gizmo_pivot', description: 'Change the gizmo pivot mode.', properties: ['name'], required: ['name'] },
+          { name: 'change_gizmo_coordinate', description: 'Change gizmo coordinates.', properties: ['type'], required: ['type'] },
+          { name: 'change_view_mode', description: 'Switch the scene view between 2D and 3D.', properties: ['is2D'], required: ['is2D'] },
+          { name: 'set_grid_visible', description: 'Show or hide the scene grid.', properties: ['visible'], required: ['visible'] },
+          { name: 'set_icon_gizmo_3d', description: 'Set IconGizmo 3D mode.', properties: ['is3D'], required: ['is3D'] },
+          { name: 'set_icon_gizmo_size', description: 'Set IconGizmo size.', properties: ['size'], required: ['size'] },
+          { name: 'focus_camera_on_nodes', description: 'Focus the scene camera on node UUIDs, or null for all.', properties: ['uuids'], required: ['uuids'] },
+          { name: 'align_camera_with_view', description: 'Apply the scene view camera pose to the selected node.' },
+          { name: 'align_view_with_node', description: 'Align the scene view to the selected node.' },
+          { name: 'reset', description: 'Reset the scene view.' },
+        ],
       ),
       this.createTool(
         'scene_view_query',
@@ -349,6 +407,18 @@ export class UnifiedTools {
           icon_gizmo_3d: 'sceneView_query_icon_gizmo_3d',
           icon_gizmo_size: 'sceneView_query_icon_gizmo_size',
         }, args),
+        {},
+        [
+          { name: 'get_status', description: 'Get complete scene-view status.' },
+          { name: 'gizmo_tool', description: 'Get the active gizmo tool.' },
+          { name: 'gizmo_pivot', description: 'Get the gizmo pivot mode.' },
+          { name: 'gizmo_view_mode', description: 'Get the gizmo view/select mode.' },
+          { name: 'gizmo_coordinate', description: 'Get the gizmo coordinate system.' },
+          { name: 'view_mode', description: 'Get whether the scene view is 2D or 3D.' },
+          { name: 'grid_visible', description: 'Get grid visibility.' },
+          { name: 'icon_gizmo_3d', description: 'Get IconGizmo 3D mode.' },
+          { name: 'icon_gizmo_size', description: 'Get IconGizmo size.' },
+        ],
       ),
       this.createTool(
         'scene_undo_manage',
@@ -360,11 +430,11 @@ export class UnifiedTools {
           end: 'sceneAdvanced_end_undo_recording',
           cancel: 'sceneAdvanced_cancel_undo_recording',
         }, args),
+        {},
         [
-          { action: 'begin', required: ['nodeUuid'] },
-          { action: 'begin', required: ['nodeUuids'] },
-          { action: 'end', required: ['undoId'] },
-          { action: 'cancel', required: ['undoId'] },
+          { name: 'begin', description: 'Start an undo record for one node or a list of nodes. Exactly one of nodeUuid or nodeUuids is required.', properties: ['nodeUuid', 'nodeUuids', 'label'], requiredAnyOf: [['nodeUuid'], ['nodeUuids']], example: { action: 'begin', nodeUuid: '<node-uuid>', label: 'Move Player' } },
+          { name: 'end', description: 'Commit an undo record.', properties: ['undoId'], required: ['undoId'] },
+          { name: 'cancel', description: 'Cancel and discard an undo record.', properties: ['undoId'], required: ['undoId'] },
         ],
       ),
       this.createTool(
@@ -379,17 +449,31 @@ export class UnifiedTools {
           get_all: 'node_get_all_nodes',
           detect_type: 'node_detect_node_type',
         }, args),
+        {},
+        [
+          { name: 'get_info', description: 'Get a node by UUID.', properties: ['uuid'], required: ['uuid'], example: { action: 'get_info', uuid: '<node-uuid>' } },
+          { name: 'find', description: 'Find nodes by name pattern.', properties: ['pattern'], required: ['pattern'], example: { action: 'find', pattern: 'Player' } },
+          { name: 'find_by_name', description: 'Find nodes by name.', properties: ['name', 'exactMatch'], required: ['name'], example: { action: 'find_by_name', name: 'Player', exactMatch: true } },
+          { name: 'get_all', description: 'List all scene nodes.' },
+          { name: 'detect_type', description: 'Detect whether a node is 2D or 3D.', properties: ['uuid'], required: ['uuid'] },
+        ],
       ),
       this.createTool(
         'node_lifecycle',
         'Create, delete, or duplicate nodes. Use node_query/scene_hierarchy first for target UUIDs; names are not stable identifiers. Actions: create, delete, duplicate.',
         ['create', 'delete', 'duplicate'],
-        ['name', 'uuid', 'parentUuid', 'nodeType', 'siblingIndex', 'assetUuid', 'assetPath', 'unlinkPrefab', 'keepWorldTransform', 'includeChildren', 'position', 'rotation', 'scale'],
+        ['name', 'uuid', 'parentUuid', 'nodeType', 'siblingIndex', 'assetUuid', 'assetPath', 'components', 'unlinkPrefab', 'keepWorldTransform', 'includeChildren', 'initialTransform', 'position', 'rotation', 'scale'],
         args => this.routeLegacyAction('node_lifecycle', {
           create: 'node_create_node',
           delete: 'node_delete_node',
           duplicate: 'node_duplicate_node',
         }, args),
+        {},
+        [
+          { name: 'create', description: 'Create an empty node, optionally add components, instantiate an asset, and apply an initial transform.', properties: ['name', 'parentUuid', 'nodeType', 'siblingIndex', 'components', 'assetUuid', 'assetPath', 'unlinkPrefab', 'keepWorldTransform', 'initialTransform', 'position', 'rotation', 'scale'], required: ['name'], example: { action: 'create', name: 'Player', nodeType: '3DNode', components: ['cc.MeshRenderer'] } },
+          { name: 'delete', description: 'Delete a node.', properties: ['uuid', 'includeChildren'], required: ['uuid'] },
+          { name: 'duplicate', description: 'Duplicate a node or prefab instance.', properties: ['uuid', 'parentUuid', 'assetUuid', 'assetPath', 'unlinkPrefab', 'keepWorldTransform'], required: ['uuid'] },
+        ],
       ),
       this.createTool(
         'node_transform',
@@ -400,6 +484,11 @@ export class UnifiedTools {
           set_transform: 'node_set_node_transform',
           set_property: 'node_set_node_property',
         }, args),
+        {},
+        [
+          { name: 'set_transform', description: 'Set one or more transform values.', properties: ['uuid', 'position', 'rotation', 'scale'], required: ['uuid'], example: { action: 'set_transform', uuid: '<node-uuid>', position: { x: 0, y: 1, z: 0 } } },
+          { name: 'set_property', description: 'Set a direct node property.', properties: ['uuid', 'property', 'value'], required: ['uuid', 'property', 'value'] },
+        ],
       ),
       this.createTool(
         'node_hierarchy',
@@ -412,6 +501,13 @@ export class UnifiedTools {
           paste: 'sceneAdvanced_paste_node',
           cut: 'sceneAdvanced_cut_node',
         }, args),
+        {},
+        [
+          { name: 'move', description: 'Move a node to a new parent.', properties: ['nodeUuid', 'newParentUuid', 'keepWorldTransform', 'siblingIndex'], required: ['nodeUuid', 'newParentUuid'], example: { action: 'move', nodeUuid: '<node-uuid>', newParentUuid: '<parent-uuid>' } },
+          { name: 'copy', description: 'Copy one or more nodes to the editor clipboard.', properties: ['uuid', 'uuids'] },
+          { name: 'paste', description: 'Paste clipboard nodes under a target.', properties: ['target', 'keepWorldTransform'], required: ['target'] },
+          { name: 'cut', description: 'Cut one or more nodes to the editor clipboard.', properties: ['uuid', 'uuids'] },
+        ],
       ),
       this.createTool(
         'node_clipboard',
@@ -423,6 +519,12 @@ export class UnifiedTools {
           paste: 'sceneAdvanced_paste_node',
           cut: 'sceneAdvanced_cut_node',
         }, args),
+        {},
+        [
+          { name: 'copy', description: 'Copy one or more nodes to the editor clipboard.', properties: ['uuids'], required: ['uuids'] },
+          { name: 'paste', description: 'Paste clipboard nodes under a target node.', properties: ['target', 'keepWorldTransform'], required: ['target'] },
+          { name: 'cut', description: 'Cut one or more nodes to the editor clipboard.', properties: ['uuids'], required: ['uuids'] },
+        ],
       ),
       this.createTool(
         'node_property_management',
@@ -435,6 +537,13 @@ export class UnifiedTools {
           move_array_element: 'sceneAdvanced_move_array_element',
           remove_array_element: 'sceneAdvanced_remove_array_element',
         }, args),
+        {},
+        [
+          { name: 'reset_property', description: 'Reset one node property to its default.', properties: ['uuid', 'path'], required: ['uuid', 'path'], example: { action: 'reset_property', uuid: '<node-uuid>', path: 'position' } },
+          { name: 'reset_transform', description: 'Reset node position, rotation, and scale.', properties: ['uuid'], required: ['uuid'] },
+          { name: 'move_array_element', description: 'Move an array element by index offset.', properties: ['uuid', 'path', 'target', 'offset'], required: ['uuid', 'path', 'target', 'offset'] },
+          { name: 'remove_array_element', description: 'Remove an array element by index.', properties: ['uuid', 'path', 'index'], required: ['uuid', 'path', 'index'] },
+        ],
       ),
       this.createTool(
         'node_reference',
@@ -445,6 +554,11 @@ export class UnifiedTools {
           nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
           restore_prefab: 'sceneAdvanced_restore_prefab',
         }, args),
+        {},
+        [
+          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes that reference an asset UUID.', properties: ['assetUuid'], required: ['assetUuid'] },
+          { name: 'restore_prefab', description: 'Restore a prefab instance through scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
+        ],
       ),
       this.createTool(
         'component_manage',
@@ -455,6 +569,11 @@ export class UnifiedTools {
           add: 'component_add_component',
           remove: 'component_remove_component',
         }, args),
+        {},
+        [
+          { name: 'add', description: 'Add a component to a node.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'add', nodeUuid: '<node-uuid>', componentType: 'cc.Camera' } },
+          { name: 'remove', description: 'Remove a component from a node. Prefer its instance UUID from component_query.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'] },
+        ],
       ),
       this.createTool(
         'component_script',
@@ -465,6 +584,11 @@ export class UnifiedTools {
           attach: 'component_attach_script',
           detach: 'component_remove_component',
         }, args),
+        {},
+        [
+          { name: 'attach', description: 'Attach a script component to a node.', properties: ['nodeUuid', 'scriptPath'], required: ['nodeUuid', 'scriptPath'], example: { action: 'attach', nodeUuid: '<node-uuid>', scriptPath: 'db://assets/scripts/Player.ts' } },
+          { name: 'detach', description: 'Detach a script component from a node.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'] },
+        ],
       ),
       this.createTool(
         'component_query',
@@ -475,16 +599,26 @@ export class UnifiedTools {
           get_components: 'component_get_components',
           get_info: 'component_get_component_info',
         }, args),
+        {},
+        [
+          { name: 'get_components', description: 'List components attached to a node.', properties: ['nodeUuid', 'includeProperties'], required: ['nodeUuid'], example: { action: 'get_components', nodeUuid: '<node-uuid>' } },
+          { name: 'get_info', description: 'Get one component’s details.', properties: ['nodeUuid', 'componentType', 'includeProperties'], required: ['nodeUuid', 'componentType'], example: { action: 'get_info', nodeUuid: '<node-uuid>', componentType: 'cc.Camera' } },
+        ],
       ),
       this.createTool(
         'component_property',
-        'Set a component property on a node. Query components first when componentType/cid or property names are unknown. Actions: set, set_property.',
+        'Set a component property on a node. Query components first when componentType/cid or property names are unknown. `propertyType` is optional and is inferred from the Inspector declaration when omitted. For `propertyType: "component"`, pass either the target component instance UUID or a node UUID; a node UUID is resolved to the matching component instance (for example, a cc.Camera-typed property accepts the Camera node UUID). For cc.MeshRenderer, use `sharedMaterials` (or alias `materials`) with `propertyType: "assetArray"` and an array of material UUIDs. Vec3 declarations such as cc.BoxCollider.size require `{x,y,z}` and are written as Vec3 even if a caller supplies the ambiguous `size` type. Example: {"action":"set_property","nodeUuid":"<node-uuid>","componentType":"MyScript","property":"camera","propertyType":"component","value":"<camera-node-or-component-uuid>"}. Actions: set, set_property.',
         ['set', 'set_property'],
         ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'],
         args => this.routeLegacyAction('component_property', {
           set: 'component_set_component_property',
           set_property: 'component_set_component_property',
         }, args),
+        {},
+        [
+          { name: 'set', description: 'Set a component property.', properties: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'], required: ['nodeUuid', 'componentType', 'property', 'value'] },
+          { name: 'set_property', description: 'Set a component property.', properties: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'], required: ['nodeUuid', 'componentType', 'property', 'value'], example: { action: 'set_property', nodeUuid: '<node-uuid>', componentType: 'MyScript', property: 'camera', propertyType: 'component', value: '<camera-node-or-component-uuid>' } },
+        ],
       ),
       this.createTool(
         'component_event_binding',
@@ -492,6 +626,13 @@ export class UnifiedTools {
         ['get_button_events', 'clear_button_events', 'set_button_events', 'append_button_event'],
         ['nodeUuid', 'componentType', 'events', 'targetNodeUuid', 'component', 'handler', 'customEventData'],
         args => this.handleComponentEventBinding(args),
+        {},
+        [
+          { name: 'get_button_events', description: 'Get Button click event bindings.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid'] },
+          { name: 'clear_button_events', description: 'Remove all Button click event bindings.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid'] },
+          { name: 'set_button_events', description: 'Replace all Button click event bindings.', properties: ['nodeUuid', 'componentType', 'events'], required: ['nodeUuid', 'events'] },
+          { name: 'append_button_event', description: 'Append one Button click event binding.', properties: ['nodeUuid', 'componentType', 'targetNodeUuid', 'component', 'handler', 'customEventData'], required: ['nodeUuid', 'targetNodeUuid', 'component', 'handler'], example: { action: 'append_button_event', nodeUuid: '<button-node-uuid>', targetNodeUuid: '<handler-node-uuid>', component: 'GameController', handler: 'onStart' } },
+        ],
       ),
       this.createTool(
         'component_available',
@@ -501,6 +642,10 @@ export class UnifiedTools {
         args => this.routeLegacyAction('component_available', {
           list: 'component_get_available_components',
         }, args),
+        {},
+        [
+          { name: 'list', description: 'List components available to add, optionally by category.', properties: ['category'] },
+        ],
       ),
       this.createTool(
         'prefab_browse',
@@ -513,6 +658,13 @@ export class UnifiedTools {
           info: 'prefab_get_prefab_info',
           validate: 'prefab_validate_prefab',
         }, args),
+        {},
+        [
+          { name: 'list', description: 'List prefabs, optionally within a folder.', properties: ['folder'], example: { action: 'list', folder: 'db://assets/prefabs' } },
+          { name: 'load', description: 'Load a prefab by asset path.', properties: ['prefabPath'], required: ['prefabPath'] },
+          { name: 'info', description: 'Get detailed prefab information.', properties: ['prefabPath'], required: ['prefabPath'] },
+          { name: 'validate', description: 'Validate a prefab file.', properties: ['prefabPath'], required: ['prefabPath'] },
+        ],
       ),
       this.createTool(
         'prefab_lifecycle',
@@ -523,6 +675,11 @@ export class UnifiedTools {
           create: 'prefab_create_prefab',
           duplicate: 'prefab_duplicate_prefab',
         }, args),
+        {},
+        [
+          { name: 'create', description: 'Create a prefab asset from a node.', properties: ['nodeUuid', 'savePath', 'prefabName'], required: ['nodeUuid', 'savePath', 'prefabName'], example: { action: 'create', nodeUuid: '<node-uuid>', savePath: 'db://assets/prefabs/Player.prefab', prefabName: 'Player' } },
+          { name: 'duplicate', description: 'Duplicate a prefab asset.', properties: ['sourcePrefabPath', 'targetPrefabPath', 'newPrefabName'], required: ['sourcePrefabPath', 'targetPrefabPath'] },
+        ],
       ),
       this.createTool(
         'prefab_instance',
@@ -535,6 +692,13 @@ export class UnifiedTools {
           restore_node: 'prefab_restore_prefab_node',
           restore: 'sceneAdvanced_restore_prefab',
         }, args),
+        {},
+        [
+          { name: 'instantiate', description: 'Instantiate a prefab in the scene.', properties: ['prefabPath', 'parentUuid', 'position'], required: ['prefabPath'], example: { action: 'instantiate', prefabPath: 'db://assets/prefabs/Player.prefab', parentUuid: '<parent-uuid>' } },
+          { name: 'revert', description: 'Discard overrides on a prefab instance.', properties: ['nodeUuid'], required: ['nodeUuid'] },
+          { name: 'restore_node', description: 'Restore a prefab instance node using its prefab asset.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
+          { name: 'restore', description: 'Restore a prefab instance through scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
+        ],
       ),
       this.createTool(
         'prefab_edit',
@@ -545,6 +709,11 @@ export class UnifiedTools {
           update: 'prefab_update_prefab',
           revert: 'prefab_revert_prefab',
         }, args),
+        {},
+        [
+          { name: 'update', description: 'Apply an instance’s overrides to its prefab asset.', properties: ['prefabPath', 'nodeUuid'], required: ['prefabPath', 'nodeUuid'] },
+          { name: 'revert', description: 'Discard prefab instance overrides.', properties: ['nodeUuid'], required: ['nodeUuid'] },
+        ],
       ),
       this.createTool(
         'prefab_reference',
@@ -555,6 +724,11 @@ export class UnifiedTools {
           restore_node: 'prefab_restore_prefab_node',
           nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
         }, args),
+        {},
+        [
+          { name: 'restore_node', description: 'Restore a prefab node from its asset.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
+          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes referencing an asset UUID.', properties: ['assetUuid'], required: ['assetUuid'] },
+        ],
       ),
       this.createTool(
         'asset_manage',
@@ -572,6 +746,18 @@ export class UnifiedTools {
           open_external: 'assetAdvanced_open_asset_external',
           create_default_spriteframe: 'assetAdvanced_create_default_spriteframe',
         }, args),
+        {},
+        [
+          { name: 'import', description: 'Import a filesystem asset into a project folder.', properties: ['sourcePath', 'targetFolder'], required: ['sourcePath', 'targetFolder'] },
+          { name: 'create', description: 'Create an asset at an asset URL.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
+          { name: 'copy', description: 'Copy an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
+          { name: 'move', description: 'Move an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
+          { name: 'delete', description: 'Delete an asset by URL.', properties: ['url'], required: ['url'] },
+          { name: 'save', description: 'Save text content to an asset URL.', properties: ['url', 'content'], required: ['url', 'content'] },
+          { name: 'reimport', description: 'Reimport an asset by URL.', properties: ['url'], required: ['url'] },
+          { name: 'open_external', description: 'Open an asset in its external application.', properties: ['urlOrUUID'], required: ['urlOrUUID'] },
+          { name: 'create_default_spriteframe', description: 'Create a solid-color SpriteFrame asset.', properties: ['savePath', 'color', 'size'], example: { action: 'create_default_spriteframe', savePath: 'db://assets/mcp/default-sprite.png', color: '#ffffff', size: 8 } },
+        ],
       ),
       this.createTool(
         'asset_query',
@@ -589,6 +775,18 @@ export class UnifiedTools {
           generate_available_url: 'assetAdvanced_generate_available_url',
           db_ready: 'assetAdvanced_query_asset_db_ready',
         }, args),
+        {},
+        [
+          { name: 'get_info', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'] },
+          { name: 'list', description: 'List assets, optionally filtered by type or folder.', properties: ['type', 'folder'] },
+          { name: 'query_path', description: 'Convert an asset URL to a filesystem path.', properties: ['url'], required: ['url'] },
+          { name: 'query_uuid', description: 'Get an asset UUID from an asset path.', properties: ['assetPath'], required: ['assetPath'] },
+          { name: 'query_url', description: 'Get an asset URL from a UUID.', properties: ['uuid'], required: ['uuid'] },
+          { name: 'find_by_name', description: 'Find assets by name.', properties: ['name', 'assetType', 'maxResults'], required: ['name'] },
+          { name: 'details', description: 'Get detailed asset information by URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
+          { name: 'generate_available_url', description: 'Generate an unused asset URL based on a requested URL.', properties: ['url'], required: ['url'], example: { action: 'generate_available_url', url: 'db://assets/NewScript.ts' } },
+          { name: 'db_ready', description: 'Check whether the Cocos asset database is ready.' },
+        ],
       ),
       this.createTool(
         'asset_analyze',
@@ -600,6 +798,12 @@ export class UnifiedTools {
           dependencies: 'assetAdvanced_get_asset_dependencies',
           unused: 'assetAdvanced_get_unused_assets',
         }, args),
+        {},
+        [
+          { name: 'validate_references', description: 'Validate asset references, optionally under one directory.', properties: ['directory'] },
+          { name: 'dependencies', description: 'Get dependencies or dependents for an asset.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'], example: { action: 'dependencies', urlOrUUID: 'db://assets/prefabs/Player.prefab', direction: 'dependencies' } },
+          { name: 'unused', description: 'Find unused assets, optionally excluding directories.', properties: ['directory', 'excludeDirectories'] },
+        ],
       ),
       this.createTool(
         'asset_batch',
@@ -612,6 +816,13 @@ export class UnifiedTools {
           compress_textures: 'assetAdvanced_compress_textures',
           export_manifest: 'assetAdvanced_export_asset_manifest',
         }, args),
+        {},
+        [
+          { name: 'batch_import', description: 'Import files from a filesystem directory.', properties: ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite'], required: ['sourceDirectory', 'targetDirectory'] },
+          { name: 'batch_delete', description: 'Delete multiple asset URLs. This is destructive.', properties: ['urls'], required: ['urls'] },
+          { name: 'compress_textures', description: 'Compress textures in a directory.', properties: ['directory', 'format', 'quality'] },
+          { name: 'export_manifest', description: 'Export an asset manifest.', properties: ['directory', 'format', 'includeMetadata'] },
+        ],
       ),
       this.createTool(
         'asset_meta',
@@ -621,10 +832,14 @@ export class UnifiedTools {
         args => this.routeLegacyAction('asset_meta', {
           save_meta: 'assetAdvanced_save_asset_meta',
         }, args),
+        {},
+        [
+          { name: 'save_meta', description: 'Save serialized meta content for an asset.', properties: ['urlOrUUID', 'content'], required: ['urlOrUUID', 'content'] },
+        ],
       ),
       this.createTool(
         'project_manage',
-        'Query project information/settings or refresh the asset database. Refresh after external file changes before querying new assets. Actions: get_info, get_settings, refresh_assets.',
+        'Query project information/settings or refresh the asset database. Refresh after external file changes before querying new assets. Example: {"action":"refresh_assets","folder":"db://assets/scripts/core"}. Actions: get_info, get_settings, refresh_assets.',
         ['get_info', 'get_settings', 'refresh_assets'],
         ['category', 'folder'],
         args => this.routeLegacyAction('project_manage', {
@@ -632,10 +847,16 @@ export class UnifiedTools {
           get_settings: 'project_get_project_settings',
           refresh_assets: 'project_refresh_assets',
         }, args),
+        {},
+        [
+          { name: 'get_info', description: 'Get project information.' },
+          { name: 'get_settings', description: 'Get project settings, optionally for one category.', properties: ['category'] },
+          { name: 'refresh_assets', description: 'Refresh the asset database after external file changes.', properties: ['folder'], example: { action: 'refresh_assets', folder: 'db://assets/scripts/core' } },
+        ],
       ),
       this.createTool(
         'project_build_system',
-        'Inspect or trigger Cocos build workflows. Prefer get_build_settings/check_builder_status before build; open panel when manual configuration is needed. Actions: build, get_build_settings, open_build_panel, check_builder_status.',
+        'Inspect or trigger Cocos build workflows. Supported actions are only build, get_build_settings, open_build_panel, and check_builder_status; there is no get_config action. get_build_settings reports builder readiness and MCP limitations, not the complete per-platform configuration. Builds open the Editor Build panel for manual configuration. Example: {"action":"build","platform":"web-mobile","debug":true}. Actions: build, get_build_settings, open_build_panel, check_builder_status.',
         ['build', 'get_build_settings', 'open_build_panel', 'check_builder_status'],
         ['platform', 'debug'],
         args => this.routeLegacyAction('project_build_system', {
@@ -644,17 +865,26 @@ export class UnifiedTools {
           open_build_panel: 'project_open_build_panel',
           check_builder_status: 'project_check_builder_status',
         }, args),
+        {},
+        [
+          { name: 'build', description: 'Open the Build panel for a platform.', properties: ['platform', 'debug'], required: ['platform'], example: { action: 'build', platform: 'web-mobile', debug: true } },
+          { name: 'get_build_settings', description: 'Report builder readiness and MCP limitations.' },
+          { name: 'open_build_panel', description: 'Open Creator’s Build panel.' },
+          { name: 'check_builder_status', description: 'Check whether the Builder service is ready.' },
+        ],
       ),
       this.createTool(
         'project_runtime',
-        'Run project preview or manage preview server. Check current project/build state first when launch fails. Actions: run, start_preview_server, stop_preview_server.',
-        ['run', 'start_preview_server', 'stop_preview_server'],
-        ['platform', 'port'],
+        'Preview entry points only. run opens the Build panel. Preview-server start/stop and status/URL queries are not exposed as supported MCP actions because Cocos provides no server-control IPC; start preview manually with Creator’s Project > Preview. Actions: run.',
+        ['run'],
+        ['platform'],
         args => this.routeLegacyAction('project_runtime', {
           run: 'project_run_project',
-          start_preview_server: 'project_start_preview_server',
-          stop_preview_server: 'project_stop_preview_server',
         }, args),
+        {},
+        [
+          { name: 'run', description: 'Open the Build panel to run or preview a platform.', properties: ['platform'], example: { action: 'run', platform: 'web-mobile' } },
+        ],
       ),
       this.createTool(
         'project_asset_system',
@@ -670,12 +900,22 @@ export class UnifiedTools {
           save: 'project_save_asset',
           reimport: 'project_reimport_asset',
         }, args),
+        {},
+        [
+          { name: 'import', description: 'Import a filesystem asset into a project folder.', properties: ['sourcePath', 'targetFolder'], required: ['sourcePath', 'targetFolder'] },
+          { name: 'create', description: 'Create an asset at an asset URL.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
+          { name: 'copy', description: 'Copy an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
+          { name: 'move', description: 'Move an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
+          { name: 'delete', description: 'Delete an asset by URL.', properties: ['url'], required: ['url'] },
+          { name: 'save', description: 'Save text content to an asset URL.', properties: ['url', 'content'], required: ['url', 'content'] },
+          { name: 'reimport', description: 'Reimport an asset by URL.', properties: ['url'], required: ['url'] },
+        ],
       ),
       this.createTool(
         'project_query',
         'Project asset query wrapper for assets, details, paths, UUIDs, and URLs. Prefer exact URL/UUID over names. Actions: assets, asset_info, asset_details, asset_path, asset_uuid, asset_url, find_asset_by_name.',
         ['assets', 'asset_info', 'asset_details', 'asset_path', 'asset_uuid', 'asset_url', 'find_asset_by_name'],
-        ['type', 'folder', 'assetPath', 'includeSubAssets', 'url', 'uuid', 'name', 'exactMatch', 'assetType', 'maxResults'],
+        ['type', 'folder', 'assetPath', 'includeSubAssets', 'url', 'uuid', 'urlOrUUID', 'name', 'exactMatch', 'assetType', 'maxResults'],
         args => this.routeLegacyAction('project_query', {
           assets: 'project_get_assets',
           asset_info: 'project_get_asset_info',
@@ -685,6 +925,16 @@ export class UnifiedTools {
           asset_url: 'project_query_asset_url',
           find_asset_by_name: 'project_find_asset_by_name',
         }, args),
+        {},
+        [
+          { name: 'assets', description: 'List assets, optionally filtered by type or folder.', properties: ['type', 'folder'] },
+          { name: 'asset_info', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'], example: { action: 'asset_info', assetPath: 'db://assets/player.prefab' } },
+          { name: 'asset_details', description: 'Get detailed asset information by asset URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
+          { name: 'asset_path', description: 'Convert an asset URL to a filesystem path.', properties: ['url'], required: ['url'] },
+          { name: 'asset_uuid', description: 'Get an asset UUID from an asset path.', properties: ['assetPath'], required: ['assetPath'] },
+          { name: 'asset_url', description: 'Get an asset URL from a UUID.', properties: ['uuid'], required: ['uuid'] },
+          { name: 'find_asset_by_name', description: 'Find assets by name.', properties: ['name', 'assetType', 'maxResults'], required: ['name'], example: { action: 'find_asset_by_name', name: 'player', assetType: 'cc.Prefab' } },
+        ],
       ),
       this.createTool(
         'debug_console',
@@ -695,6 +945,11 @@ export class UnifiedTools {
           get: 'debug_get_console_logs',
           clear: 'debug_clear_console',
         }, args),
+        {},
+        [
+          { name: 'get', description: 'Read recent editor console messages.', properties: ['limit', 'filter'] },
+          { name: 'clear', description: 'Clear captured editor console messages.' },
+        ],
       ),
       this.createTool(
         'debug_logs',
@@ -706,6 +961,12 @@ export class UnifiedTools {
           get_log_file_info: 'debug_get_log_file_info',
           search: 'debug_search_project_logs',
         }, args),
+        {},
+        [
+          { name: 'get_project_logs', description: 'Read recent project log lines.', properties: ['lines', 'filterKeyword', 'logLevel'] },
+          { name: 'get_log_file_info', description: 'Get project log-file information.' },
+          { name: 'search', description: 'Search project logs by pattern.', properties: ['pattern', 'maxResults', 'contextLines'], required: ['pattern'] },
+        ],
       ),
       this.createTool(
         'debug_execute',
@@ -715,6 +976,10 @@ export class UnifiedTools {
         args => this.routeLegacyAction('debug_execute', {
           script: 'debug_execute_script',
         }, args),
+        {},
+        [
+          { name: 'script', description: 'Legacy endpoint that always rejects arbitrary JavaScript.', properties: ['script'], required: ['script'], status: 'unsupported', unsupportedReason: 'Arbitrary JavaScript execution is not supported. Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or a registered scene method.' },
+        ],
       ),
       this.createTool(
         'debug_scene',
@@ -726,15 +991,25 @@ export class UnifiedTools {
           validate: 'debug_validate_scene',
           editor_info: 'debug_get_editor_info',
         }, args),
+        {},
+        [
+          { name: 'node_tree', description: 'Get a detailed scene node tree.', properties: ['rootUuid', 'maxDepth'] },
+          { name: 'validate', description: 'Validate the current scene.', properties: ['checkMissingAssets', 'checkPerformance'] },
+          { name: 'editor_info', description: 'Get editor and environment information.' },
+        ],
       ),
       this.createTool(
         'debug_performance',
-        'Get editor/game performance stats for diagnosis. Actions: stats.',
+        'Get editor/game performance stats for diagnosis. The only action is `stats` (not `get_stats`). In edit mode it may return `{ available: false, reason, recommendedCollectionMethod }` because Cocos does not expose runtime counters there. Actions: stats.',
         ['stats'],
         [],
         args => this.routeLegacyAction('debug_performance', {
           stats: 'debug_get_performance_stats',
         }, args),
+        {},
+        [
+          { name: 'stats', description: 'Get available editor/game performance statistics.' },
+        ],
       ),
       this.createTool(
         'preferences_manage',
@@ -750,6 +1025,16 @@ export class UnifiedTools {
           export: 'preferences_export_preferences',
           import: 'preferences_import_preferences',
         }, args),
+        {},
+        [
+          { name: 'open', description: 'Open the preferences settings panel.', properties: ['tab', 'args'] },
+          { name: 'query', description: 'Query one preferences configuration value.', properties: ['name', 'path', 'type'], required: ['name'] },
+          { name: 'set', description: 'Set one preferences configuration value.', properties: ['name', 'path', 'value', 'type'], required: ['name', 'path', 'value'] },
+          { name: 'get_all', description: 'Get all available preference categories.' },
+          { name: 'reset', description: 'Reset a preference category or all preferences.', properties: ['name', 'type'] },
+          { name: 'export', description: 'Export preferences to a file.', properties: ['exportPath'] },
+          { name: 'import', description: 'Import preferences from a file.', properties: ['importPath'], required: ['importPath'] },
+        ],
       ),
       this.createTool(
         'server_info',
@@ -762,6 +1047,13 @@ export class UnifiedTools {
           port: 'server_query_server_port',
           status: 'server_get_server_status',
         }, args),
+        {},
+        [
+          { name: 'ip_list', description: 'List server IP addresses.' },
+          { name: 'sorted_ip_list', description: 'List server IP addresses in sorted order.' },
+          { name: 'port', description: 'Get the editor server port.' },
+          { name: 'status', description: 'Get server status metadata.' },
+        ],
       ),
       this.createTool(
         'server_network',
@@ -772,6 +1064,11 @@ export class UnifiedTools {
           connectivity: 'server_check_server_connectivity',
           interfaces: 'server_get_network_interfaces',
         }, args),
+        {},
+        [
+          { name: 'connectivity', description: 'Check MCP server connectivity.', properties: ['timeout'] },
+          { name: 'interfaces', description: 'List local network interfaces.' },
+        ],
       ),
       this.createTool(
         'server_control',
@@ -779,6 +1076,12 @@ export class UnifiedTools {
         ['health', 'settings', 'available_tools'],
         [],
         args => this.handleServerControl(args),
+        {},
+        [
+          { name: 'health', description: 'Get MCP server health.' },
+          { name: 'settings', description: 'Get active MCP server settings.' },
+          { name: 'available_tools', description: 'List tools currently available through this MCP server.' },
+        ],
       ),
       this.createTool(
         'broadcast_message',
@@ -792,6 +1095,14 @@ export class UnifiedTools {
           clear_log: 'broadcast_clear_broadcast_log',
           active_listeners: 'broadcast_get_active_listeners',
         }, args),
+        {},
+        [
+          { name: 'get_log', description: 'Read captured broadcast messages.', properties: ['limit', 'messageType'] },
+          { name: 'listen', description: 'Start listening for a broadcast message type.', properties: ['messageType'], required: ['messageType'] },
+          { name: 'stop_listening', description: 'Stop listening for a broadcast message type.', properties: ['messageType'], required: ['messageType'] },
+          { name: 'clear_log', description: 'Clear captured broadcast messages.' },
+          { name: 'active_listeners', description: 'List active broadcast listeners.' },
+        ],
       ),
       this.createTool(
         'reference_image_manage',
@@ -812,6 +1123,21 @@ export class UnifiedTools {
           list: 'referenceImage_list_reference_images',
           clear_all: 'referenceImage_clear_all_reference_images',
         }, args),
+        {},
+        [
+          { name: 'add', description: 'Add reference images from absolute paths.', properties: ['paths'], required: ['paths'] },
+          { name: 'remove', description: 'Remove reference images, or the current image when paths is omitted.', properties: ['paths'] },
+          { name: 'switch', description: 'Switch to a reference image.', properties: ['path', 'sceneUUID'], required: ['path'] },
+          { name: 'set_data', description: 'Set one reference-image data property.', properties: ['key', 'value'], required: ['key', 'value'] },
+          { name: 'query_config', description: 'Get reference-image configuration.' },
+          { name: 'query_current', description: 'Get the current reference image.' },
+          { name: 'refresh', description: 'Refresh reference-image display.' },
+          { name: 'set_position', description: 'Set reference-image position.', properties: ['x', 'y'], required: ['x', 'y'] },
+          { name: 'set_scale', description: 'Set reference-image scale.', properties: ['sx', 'sy'], required: ['sx', 'sy'] },
+          { name: 'set_opacity', description: 'Set reference-image opacity.', properties: ['opacity'], required: ['opacity'] },
+          { name: 'list', description: 'List reference images.' },
+          { name: 'clear_all', description: 'Clear all reference images.' },
+        ],
       ),
       this.createTool(
         'validation_params',
@@ -823,6 +1149,12 @@ export class UnifiedTools {
           safe_string: 'validation_safe_string_value',
           format_mcp_request: 'validation_format_mcp_request',
         }, args),
+        {},
+        [
+          { name: 'validate_json', description: 'Validate and repair JSON parameters.', properties: ['jsonString', 'expectedSchema'], required: ['jsonString'] },
+          { name: 'safe_string', description: 'Create a JSON-safe string value.', properties: ['value'], required: ['value'] },
+          { name: 'format_mcp_request', description: 'Format a complete MCP request.', properties: ['toolName', 'arguments'], required: ['toolName', 'arguments'] },
+        ],
       ),
       this.createTool(
         'resource_reference',
@@ -834,6 +1166,12 @@ export class UnifiedTools {
           asset_dependencies: 'assetAdvanced_get_asset_dependencies',
           validate_asset_references: 'assetAdvanced_validate_asset_references',
         }, args),
+        {},
+        [
+          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes that reference an asset.', properties: ['assetUuid'], required: ['assetUuid'] },
+          { name: 'asset_dependencies', description: 'Get asset dependencies or dependents.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'] },
+          { name: 'validate_asset_references', description: 'Validate asset references, optionally under a directory.', properties: ['directory'] },
+        ],
       ),
       this.createTool(
         'tool_registry',
@@ -841,6 +1179,12 @@ export class UnifiedTools {
         ['list', 'describe', 'actions'],
         ['toolName'],
         args => this.handleToolRegistry(args),
+        {},
+        [
+          { name: 'list', description: 'List public MCP tools.' },
+          { name: 'describe', description: 'Get an action-specific contract for one tool.', properties: ['toolName'], required: ['toolName'], example: { action: 'describe', toolName: 'node_lifecycle' } },
+          { name: 'actions', description: 'List action names and statuses for all tools.' },
+        ],
       ),
     ]
   }
@@ -852,34 +1196,116 @@ export class UnifiedTools {
     propertyKeys: string[],
     execute: (args: ToolArguments) => Promise<ToolResponse>,
     actionRequirements: Record<string, string[]> | Array<{ action: string, required: string[] }> = {},
+    actionSpecs?: ActionSpec[],
   ): RegisteredTool {
     const requirements = Array.isArray(actionRequirements)
       ? actionRequirements
       : Object.entries(actionRequirements).map(([action, required]) => ({ action, required }))
-    const anyOf = requirements.map(({ action, required }) => ({
+    const specs = actionSpecs?.map(spec => ({ status: 'supported' as const, properties: [], required: [], ...spec }))
+    const supportedSpecs = specs?.filter(spec => spec.status !== 'unsupported')
+    const actionNames = supportedSpecs?.map(spec => spec.name) ?? actions
+    const actionPropertyKeys = supportedSpecs
+      ? [...new Set(supportedSpecs.flatMap(spec => spec.properties))]
+      : propertyKeys
+    const schemaActions = supportedSpecs?.map(({ name: action, properties, required, requiredAnyOf }) => ({
+      type: 'object',
       properties: {
         action: { type: 'string', enum: [action] },
+        ...pickProps(properties),
       },
       required: ['action', ...required],
+      additionalProperties: false,
+      ...(requiredAnyOf && requiredAnyOf.length > 0
+        ? { anyOf: requiredAnyOf.map(fields => ({ required: fields })) }
+        : {}),
     }))
+    const anyOf = specs
+      ? undefined
+      : requirements.map(({ action, required }) => ({
+          properties: {
+            action: { type: 'string', enum: [action] },
+          },
+          required: ['action', ...required],
+        }))
     return {
       name,
-      description,
+      description: this.createPublicDescription(description, actionNames),
       inputSchema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: actions,
-            description: `Operation code. Supported actions: ${actions.join(', ')}`,
+            enum: actionNames,
+            description: `Operation code. Available actions: ${actionNames.join(', ')}`,
           },
-          ...pickProps(propertyKeys),
+          ...pickProps(actionPropertyKeys),
         },
         required: ['action'],
-        ...(anyOf.length === 0 ? {} : { anyOf }),
+        ...(schemaActions ? { oneOf: schemaActions } : {}),
+        ...(anyOf && anyOf.length > 0 ? { anyOf } : {}),
       },
       execute,
+      actionSpecs: specs,
     }
+  }
+
+  private createPublicDescription(description: string, actions: string[]): string {
+    const overview = description.replace(/\s*Actions:[^.]+\.\s*$/, '').trim()
+    return `${overview} Actions: ${actions.length > 0 ? actions.join(', ') : 'none (inspect tool_registry.describe for legacy compatibility metadata)'}.`
+  }
+
+  private getActionContractFailure(toolName: string, specs: ActionSpec[] | undefined, args: ToolArguments): ToolResponse | undefined {
+    if (!specs) {
+      return undefined
+    }
+
+    const action = args.action
+    if (typeof action !== 'string' || !action) {
+      return toolFailure(`${toolName} requires an action parameter`, {
+        instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${specs.filter(spec => spec.status !== 'unsupported').map(spec => spec.name).join(', ')}.`,
+      })
+    }
+
+    const spec = specs.find(item => item.name === action)
+    if (!spec) {
+      return toolFailure(`Unsupported action '${action}' for ${toolName}`, {
+        instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${specs.filter(item => item.status !== 'unsupported').map(item => item.name).join(', ')}.`,
+      })
+    }
+
+    if (spec.status === 'unsupported') {
+      return toolFailure(`Action '${action}' is unsupported for ${toolName}`, {
+        data: { toolName, action, status: spec.status, reason: spec.unsupportedReason },
+        instruction: spec.unsupportedReason || `Call tool_registry.describe with toolName="${toolName}" to choose a supported action.`,
+      })
+    }
+
+    const allowed = new Set(['action', ...(spec.properties ?? [])])
+    const unexpected = Object.keys(args).filter(key => !allowed.has(key))
+    if (unexpected.length > 0) {
+      return toolFailure(`Action '${action}' for ${toolName} does not accept: ${unexpected.join(', ')}`, {
+        data: { toolName, action, allowedProperties: [...allowed] },
+        instruction: `Remove ${unexpected.join(', ')}. Allowed fields: ${[...allowed].join(', ')}. Call tool_registry.describe with toolName="${toolName}" for the complete contract.`,
+      })
+    }
+
+    const missing = (spec.required ?? []).filter(key => !Object.hasOwn(args, key))
+    if (missing.length > 0) {
+      return toolFailure(`Action '${action}' for ${toolName} requires: ${missing.join(', ')}`, {
+        data: { toolName, action, missing, required: spec.required },
+        instruction: `Add ${missing.join(', ')} and retry. Call tool_registry.describe with toolName="${toolName}" for an example.`,
+      })
+    }
+
+    if (spec.requiredAnyOf && !spec.requiredAnyOf.some(group => group.every(key => Object.hasOwn(args, key)))) {
+      const alternatives = spec.requiredAnyOf.map(group => group.join(' + ')).join(' or ')
+      return toolFailure(`Action '${action}' for ${toolName} requires one of: ${alternatives}`, {
+        data: { toolName, action, requiredAnyOf: spec.requiredAnyOf },
+        instruction: `Add ${alternatives} and retry. Call tool_registry.describe with toolName="${toolName}" for an example.`,
+      })
+    }
+
+    return undefined
   }
 
   private async routeLegacyAction(toolName: string, actionMap: Record<string, string>, args: ToolArguments): Promise<ToolResponse> {
@@ -1037,7 +1463,7 @@ export class UnifiedTools {
   }
 
   private async handleToolRegistry(args: ToolArguments): Promise<ToolResponse> {
-    const tools = this.getTools()
+    const tools = this.tools
     switch (args.action) {
       case 'list':
         return {
@@ -1061,7 +1487,21 @@ export class UnifiedTools {
         }
         return {
           success: true,
-          data: target,
+          data: {
+            name: target.name,
+            description: target.description,
+            inputSchema: target.inputSchema,
+            actions: target.actionSpecs?.map(spec => ({
+              name: spec.name,
+              description: spec.description,
+              required: spec.required,
+              requiredAnyOf: spec.requiredAnyOf,
+              properties: spec.properties,
+              example: spec.example,
+              status: spec.status,
+              unsupportedReason: spec.unsupportedReason,
+            })),
+          },
         }
       }
       case 'actions':
@@ -1069,7 +1509,10 @@ export class UnifiedTools {
           success: true,
           data: tools.map(tool => ({
             name: tool.name,
-            actions: tool.inputSchema?.properties?.action?.enum ?? [],
+            actions: tool.actionSpecs?.map(spec => ({
+              name: spec.name,
+              status: spec.status,
+            })) ?? tool.inputSchema?.properties?.action?.enum ?? [],
           })),
         }
       default:

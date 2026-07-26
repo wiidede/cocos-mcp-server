@@ -15,5 +15,6 @@ describe('node value helpers', () => {
   it('detects node dimensionality from components before position', () => {
     expect(is2DNodeInfo({ components: [{ type: 'cc.Sprite' }], position: { z: 9 } })).toBe(true)
     expect(is2DNodeInfo({ components: [{ type: 'cc.MeshRenderer' }], position: { z: 0 } })).toBe(false)
+    expect(is2DNodeInfo({ components: [], position: { z: 0 } })).toBe(false)
   })
 })

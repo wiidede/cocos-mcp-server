@@ -848,6 +848,8 @@ export class AssetAdvancedTools implements ToolExecutor {
             pngPath: targetPath,
             pngUuid: info.uuid,
             spriteFrameUuid: fallbackUuid,
+            color: { r, g, b, a },
+            size,
             warning: 'SpriteFrame sub-asset not found by name; returned "{baseUuid}@f9941" fallback',
             cached: sameContent,
           },

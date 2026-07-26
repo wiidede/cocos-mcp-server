@@ -734,8 +734,16 @@ export class ProjectTools implements ToolExecutor {
             availableActions: [
               'Open build panel with open_build_panel',
               'Check builder status with check_builder_status',
-              'Start preview server with start_preview_server',
-              'Stop preview server with stop_preview_server',
+            ],
+            unsupportedActions: [
+              {
+                action: 'project_runtime.start_preview_server',
+                reason: 'Cocos exposes no supported MCP IPC for preview-server control. Start preview manually with Creator’s Project > Preview.',
+              },
+              {
+                action: 'project_runtime.stop_preview_server',
+                reason: 'Cocos exposes no supported MCP IPC for preview-server control.',
+              },
             ],
             limitation: 'Full build configuration requires direct Editor UI access',
           },

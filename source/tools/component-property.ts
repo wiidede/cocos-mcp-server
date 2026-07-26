@@ -92,13 +92,13 @@ export function analyzeComponentProperty(component: unknown, propertyName: strin
   if (!exists)
     return { exists: false, type: 'unknown', availableProperties, originalValue: undefined }
   const isComponent = declaredType !== 'cc.Node' && declaredExtends?.includes('cc.Component')
+  const declaredValueType = resolveDeclaredComponentValueType(declaredType)
   const type = isComponent
     ? 'component'
-    : declaredType === 'cc.Node'
-      ? 'node'
-      : declaredExtends?.includes('cc.Asset')
+    : declaredValueType
+      ?? (declaredExtends?.includes('cc.Asset')
         ? 'asset'
-        : inferComponentPropertyType(originalValue, propertyName, null) ?? 'unknown'
+        : inferComponentPropertyType(originalValue, propertyName, null) ?? 'unknown')
   return { exists: true, type, availableProperties, originalValue, declaredType, declaredExtends, declaredPath, isArray }
 }
 
@@ -109,6 +109,16 @@ export function resolveComponentPropertyPath(componentIndex: number, propertyNam
   if (path.startsWith('__comps__.'))
     return path
   return `__comps__.${componentIndex}.${path}`
+}
+
+export function resolveDeclaredComponentValueType(declaredType: string | undefined): string | null {
+  switch (declaredType?.toLowerCase()) {
+    case 'cc.vec2': return 'vec2'
+    case 'cc.vec3': return 'vec3'
+    case 'cc.size': return 'size'
+    case 'cc.color': return 'color'
+    default: return null
+  }
 }
 
 export function inferComponentPropertyType(value: unknown, propertyName: string, context: PropertyTypeContext | null): string | null {
@@ -187,7 +197,12 @@ export function normalizeComponentPropertyType(rawType: string | undefined, valu
     'prefab': 'prefab',
     'cc.prefab': 'prefab',
     'asset': 'asset',
-    'cc.asset': 'asset',
+    'array': 'array',
+    'assetarray': 'assetArray',
+    'assetArray': 'assetArray',
+    'materialarray': 'assetArray',
+    'materialArray': 'assetArray',
+    'cc.material[]': 'assetArray',
     'nodearray': 'nodeArray',
     'nodeArray': 'nodeArray',
     'colorarray': 'colorArray',
@@ -293,7 +308,7 @@ export function isScriptComponent(component: unknown, scriptName: string): boole
 }
 
 export function buildUnsupportedComponentPropertyTypeError(rawType: string, value: unknown): string {
-  const supported = ['color', 'vec2', 'vec3', 'size', 'number', 'string', 'boolean', 'enum', 'object', 'node', 'asset', 'colorArray', 'numberArray', 'stringArray', 'nodeArray']
+  const supported = ['color', 'vec2', 'vec3', 'size', 'number', 'string', 'boolean', 'enum', 'object', 'node', 'asset', 'assetArray', 'colorArray', 'numberArray', 'stringArray', 'nodeArray']
   return `Unsupported property type: "${rawType}".\n`
     + `propertyType is case-insensitive. Supported types: ${supported.join(', ')}.\n`
     + `Tip: if you omit propertyType, the value will be auto-detected from the JSON shape.\n`

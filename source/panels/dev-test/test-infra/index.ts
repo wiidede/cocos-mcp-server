@@ -1,28 +1,19 @@
 /**
- * Dev Test 入口
- * 集中注册所有测试用例；导出 testRunner 实例给 panel 直接使用。
+ * Dev Test entry point.
+ *
+ * Regression batches are exported and aggregated by `cases/regression/index.ts`.
+ * Keep registration here data-driven so a newly added batch cannot be exported
+ * without appearing in the Dev Test Panel.
  */
 
-import { batch1Tests } from '../cases/regression/batch-1'
-import { batch2Tests } from '../cases/regression/batch-2'
-import { batch3Tests } from '../cases/regression/batch-3'
-import { batch4Tests } from '../cases/regression/batch-4'
+import { allRegressionTests } from '../cases/regression'
 import { testRunner } from './runner'
 
-for (const c of batch1Tests) {
-  testRunner.register(c)
-}
-for (const c of batch2Tests) {
-  testRunner.register(c)
-}
-for (const c of batch3Tests) {
-  testRunner.register(c)
-}
-for (const c of batch4Tests) {
-  testRunner.register(c)
+for (const testCase of allRegressionTests) {
+  testRunner.register(testCase)
 }
 
-console.log(`[dev-test] registered ${batch1Tests.length} batch-1 + ${batch2Tests.length} batch-2 + ${batch3Tests.length} batch-3 + ${batch4Tests.length} batch-4 regression tests`)
+console.log(`[dev-test] registered ${allRegressionTests.length} regression tests`)
 
 export { testRunner }
 export type { TestCase } from './metadata'

@@ -122,7 +122,7 @@ export class ComponentTools implements ToolExecutor {
             },
             propertyType: {
               type: 'string',
-              description: 'Property type - Must explicitly specify the property data type for correct value conversion and validation',
+              description: 'Property type - Optional. When omitted or "auto", the tool infers it from the Inspector declaration and JSON shape. Specify it only when the declaration is ambiguous.',
               enum: [
                 'string',
                 'number',
@@ -138,6 +138,8 @@ export class ComponentTools implements ToolExecutor {
                 'spriteFrame',
                 'prefab',
                 'asset',
+                'assetArray',
+                'array',
                 'nodeArray',
                 'colorArray',
                 'numberArray',
@@ -172,6 +174,8 @@ export class ComponentTools implements ToolExecutor {
                 + '  How to get: Check asset database or use asset browser\n'
                 + '• asset: "asset-uuid" (generic asset reference)\n'
                 + '  How to get: Check asset database or use asset browser\n\n'
+                + '• assetArray: ["material-uuid"] (array of asset references, e.g. cc.MeshRenderer.sharedMaterials)\n'
+                + '  For MeshRenderer, `materials` is accepted as an alias for Inspector property `sharedMaterials`.\n\n'
                 + '📋 Array Types:\n'
                 + '• nodeArray: ["uuid1","uuid2"] (array of node UUIDs)\n'
                 + '• colorArray: [{"r":255,"g":0,"b":0,"a":255}] (array of colors)\n'
@@ -179,7 +183,7 @@ export class ComponentTools implements ToolExecutor {
                 + '• stringArray: ["item1","item2"] (array of strings)',
             },
           },
-          required: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'],
+          required: ['nodeUuid', 'componentType', 'property', 'value'],
         },
       },
       {
@@ -328,6 +332,12 @@ export class ComponentTools implements ToolExecutor {
         }
       }
 
+      const existingComponentIds: Set<string> = new Set(
+        allComponentsInfo.success && Array.isArray(allComponentsInfo.data?.components)
+          ? allComponentsInfo.data.components.map((component: unknown) => getComponentSceneId(component)).filter((id: string | null): id is string => id !== null)
+          : [],
+      )
+
       // 尝试直接使用 Editor API 添加组件
       Editor.Message.request('scene', 'create-component', {
         uuid: nodeUuid,
@@ -349,6 +359,16 @@ export class ComponentTools implements ToolExecutor {
 
             if (allComponentsInfo2.success && allComponentsInfo2.data?.components) {
               addedComponent = allComponentsInfo2.data.components.find((comp: unknown) => componentMatchesType(comp, effectiveComponentType))
+
+              // Cocos serializes some script components by their compressed script cid,
+              // so matching by the requested class name is impossible. A new component after
+              // a successful create-component request is authoritative in that case.
+              if (!addedComponent && isScriptComponent) {
+                addedComponent = allComponentsInfo2.data.components.find((comp: unknown) => {
+                  const id = getComponentSceneId(comp)
+                  return id !== null && !existingComponentIds.has(id)
+                }) ?? null
+              }
 
               if (addedComponent) {
                 // 找到组件，验证成功
@@ -647,7 +667,13 @@ export class ComponentTools implements ToolExecutor {
   }
 
   private async setComponentProperty(args: ComponentPropertyInput): Promise<ToolResponse> {
-    const { nodeUuid, componentType, property, value } = args
+    const { nodeUuid, componentType, value } = args
+    let property = args.property
+
+    // MeshRenderer exposes `sharedMaterials` in the Inspector while its runtime API
+    // commonly uses `materials`. Accept the runtime spelling without hiding the real path.
+    if (componentType === 'cc.MeshRenderer' && property === 'materials')
+      property = 'sharedMaterials'
 
     // 归一化 propertyType：大小写不敏感、支持常见别名；未传则做自动检测
     let propertyType = normalizeComponentPropertyType(args.propertyType, value)
@@ -704,6 +730,13 @@ export class ComponentTools implements ToolExecutor {
         if (propertyInfo.type === 'component' && propertyType !== 'component') {
           console.log(`[ComponentTools] Property '${property}' is declared as component reference (${propertyInfo.declaredType}); overriding propertyType '${propertyType}' -> 'component'`)
           propertyType = 'component'
+        }
+        else if (propertyInfo.isArray && propertyInfo.type === 'asset' && propertyType !== 'assetArray') {
+          propertyType = 'assetArray'
+        }
+        else if (propertyInfo.type === 'vec3' && propertyType === 'size') {
+          // BoxCollider.size is a cc.Vec3 despite its ambiguous property name.
+          propertyType = 'vec3'
         }
 
         // Step 3: 处理属性值和设置
@@ -836,6 +869,20 @@ export class ComponentTools implements ToolExecutor {
               throw new TypeError(`${propertyType} value must be a UUID string or an object with a string uuid field`)
             }
             break
+          case 'assetArray':
+            if (!Array.isArray(value))
+              throw new TypeError('assetArray value must be an array of UUID strings or { uuid } objects')
+            processedValue = value.map((item) => {
+              if (typeof item === 'string')
+                return { uuid: item }
+              if (isToolArguments(item) && typeof item.uuid === 'string')
+                return { uuid: item.uuid }
+              // Accept an Inspector dump element as well as the concise UUID form.
+              if (isToolArguments(item) && isToolArguments(item.value) && typeof item.value.uuid === 'string')
+                return { uuid: item.value.uuid }
+              throw new TypeError('assetArray items must be UUID strings or objects with a string uuid field')
+            })
+            break
           case 'nodeArray':
             if (Array.isArray(value)) {
               processedValue = value.map((item) => {
@@ -938,7 +985,7 @@ export class ComponentTools implements ToolExecutor {
         const propertyPath = resolveComponentPropertyPath(rawComponentIndex, property, propertyInfo.declaredPath)
 
         // 特殊处理资源类属性
-        if (propertyType === 'asset' || propertyType === 'spriteFrame' || propertyType === 'prefab'
+        if (propertyType === 'asset' || propertyType === 'assetArray' || propertyType === 'spriteFrame' || propertyType === 'prefab'
           || (propertyInfo.type === 'asset' && propertyType === 'string')) {
           console.log(`[ComponentTools] Setting asset reference:`, {
             value: processedValue,
@@ -948,33 +995,38 @@ export class ComponentTools implements ToolExecutor {
           })
 
           const assetType = resolveComponentAssetType(property, propertyType, propertyInfo)
-          const requestedAssetUuid = isToolArguments(processedValue) && typeof processedValue.uuid === 'string'
-            ? processedValue.uuid
-            : String(value)
-          const assetInfo = await requestAssetDb('query-asset-info', requestedAssetUuid).catch(() => null)
-          if (!assetInfo) {
-            throw new Error(`Asset UUID '${requestedAssetUuid}' was not found by Cocos asset-db. Query the asset again after import/refresh and use the UUID returned by asset-db.`)
+          const requestedAssets = propertyType === 'assetArray'
+            ? processedValue as Array<{ uuid: string }>
+            : [isToolArguments(processedValue) && typeof processedValue.uuid === 'string' ? processedValue : { uuid: String(value) }]
+          const canonicalAssets: Array<{ uuid: string }> = []
+          for (const requestedAsset of requestedAssets) {
+            const assetInfo = await this.queryAssetInfoForReference(requestedAsset.uuid as string).catch(() => null)
+            if (!assetInfo)
+              throw new Error(`Asset UUID '${requestedAsset.uuid}' was not found by Cocos asset-db. Query the asset again after import/refresh and use the UUID returned by asset-db.`)
+            const canonicalAsset = this.resolveCanonicalAssetReference(assetInfo, assetType, requestedAsset.uuid as string)
+            if (!canonicalAsset) {
+              const actualType = isToolArguments(assetInfo) && typeof assetInfo.type === 'string' ? assetInfo.type : 'unknown'
+              throw new Error(`Asset '${requestedAsset.uuid}' is not compatible with ${assetType} (asset-db type: ${actualType}). Query the source asset with sub-assets included and use the matching sub-asset UUID.`)
+            }
+            canonicalAssets.push({ uuid: canonicalAsset.uuid })
           }
-          const canonicalAsset = resolveCanonicalAssetReference(assetInfo, assetType)
-          if (!canonicalAsset) {
-            const actualType = typeof assetInfo.type === 'string' ? assetInfo.type : 'unknown'
-            throw new Error(`Asset '${requestedAssetUuid}' is not compatible with ${assetType} (asset-db type: ${actualType}). Query the source asset with sub-assets included and use the matching sub-asset UUID.`)
-          }
-          processedValue = { uuid: canonicalAsset.uuid }
-          actualExpectedValue = processedValue
+          processedValue = propertyType === 'assetArray' ? canonicalAssets : canonicalAssets[0]
+          const dumpValue = propertyType === 'assetArray'
+            ? canonicalAssets.map(asset => ({ value: asset, type: assetType }))
+            : processedValue
+          actualExpectedValue = dumpValue
 
           const changed = await requestScene('set-property', {
             uuid: nodeUuid,
             path: propertyPath,
             dump: {
-              value: processedValue,
+              value: dumpValue,
               type: assetType,
-              ...(propertyInfo.isArray === undefined ? {} : { isArray: propertyInfo.isArray }),
+              ...(propertyType === 'assetArray' || propertyInfo.isArray === true ? { isArray: true } : {}),
             },
           })
-          if (!changed) {
-            throw new Error(`Cocos Editor rejected the asset reference write for '${propertyPath}'. Verify that '${canonicalAsset.uuid}' is the UUID of the expected sub-asset (${assetType}), not the source image UUID.`)
-          }
+          if (!changed)
+            throw new Error(`Cocos Editor rejected the asset reference write for '${propertyPath}'. Verify that the UUID is for the expected asset type (${assetType}).`)
         }
         else if (componentType === 'cc.UITransform' && (property === '_contentSize' || property === 'contentSize')) {
           const size = isToolArguments(value) ? value : {}
@@ -1259,9 +1311,11 @@ export class ComponentTools implements ToolExecutor {
 
         const strictReferenceVerification = propertyInfo.type === 'asset'
           || propertyType === 'asset'
-          || propertyType === 'spriteFrame'
-          || propertyType === 'prefab'
-        const verification = await this.verifyPropertyChange(nodeUuid, componentType, property, originalValue, actualExpectedValue, strictReferenceVerification)
+          || propertyType === 'assetArray'
+        const verificationExpectedValue = propertyType === 'assetArray' && Array.isArray(actualExpectedValue)
+          ? actualExpectedValue.map(item => isToolArguments(item) && isToolArguments(item.value) ? item.value : item)
+          : actualExpectedValue
+        const verification = await this.verifyPropertyChange(nodeUuid, componentType, property, originalValue, verificationExpectedValue, strictReferenceVerification)
 
         if (strictReferenceVerification && !verification.verified) {
           resolve(toolFailure(`Asset reference verification failed for ${componentType}.${property}.`, {
@@ -1415,6 +1469,36 @@ export class ComponentTools implements ToolExecutor {
         components,
       },
     }
+  }
+
+  private resolveCanonicalAssetReference(assetInfo: unknown, expectedType: string, requestedUuid: string): { uuid: string, type?: string } | null {
+    const canonical = resolveCanonicalAssetReference(assetInfo, expectedType)
+    if (canonical)
+      return canonical
+
+    // When a Cocos sub-asset UUID cannot be queried directly, asset-db returns
+    // its source image. Its compact `query-asset-info` response may omit
+    // subAssets, but the original `<source>@<sub-id>` reference is still valid
+    // and has an expected sub-asset suffix. Preserve that exact reference.
+    const sourceUuid = requestedUuid.split('@', 1)[0]
+    if (sourceUuid !== requestedUuid && isToolArguments(assetInfo) && assetInfo.uuid === sourceUuid)
+      return { uuid: requestedUuid, type: expectedType }
+    return null
+  }
+
+  private async queryAssetInfoForReference(uuid: string): Promise<unknown> {
+    const direct = await requestAssetDb('query-asset-info', uuid).catch(() => null)
+    if (direct)
+      return direct
+
+    // Cocos image sub-assets commonly use `<image-uuid>@<sub-asset-id>`. Some
+    // Editor versions cannot query that compound UUID directly, although it is
+    // valid for set-property. Query its source asset so canonicalization can
+    // inspect its sub-assets instead.
+    const sourceUuid = uuid.split('@', 1)[0]
+    if (sourceUuid === uuid)
+      return null
+    return requestAssetDb('query-asset-info', sourceUuid).catch(() => null)
   }
 
   private async verifyPropertyChange(nodeUuid: string, componentType: string, property: string, originalValue: unknown, expectedValue: unknown, strictReference: boolean = false): Promise<ComponentPropertyVerification> {

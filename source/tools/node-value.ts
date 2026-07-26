@@ -83,6 +83,7 @@ export function is2DNodeInfo(nodeInfo: unknown): boolean {
     return true
   if (types.some(type => ['MeshRenderer', 'Camera', 'Light', 'DirectionalLight', 'PointLight', 'SpotLight'].some(name => type.includes(`cc.${name}`))))
     return false
-  const position = asRecord(record?.position)
-  return typeof position?.z === 'number' ? Math.abs(position.z) < 0.001 : false
+  // An empty node carries no reliable 2D signal. Treat it as 3D so transforms are
+  // never destructively flattened; explicit 2D components above still take priority.
+  return false
 }

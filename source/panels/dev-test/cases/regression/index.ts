@@ -9,15 +9,18 @@ import { batch1Tests } from './batch-1'
 import { batch2Tests } from './batch-2'
 import { batch3Tests } from './batch-3'
 import { batch4Tests } from './batch-4'
+import { batch5Tests } from './batch-5'
 
 export { batch1Tests } from './batch-1'
 export { batch2Tests } from './batch-2'
 export { batch3Tests } from './batch-3'
 export { batch4Tests } from './batch-4'
+export { batch5Tests } from './batch-5'
 
 export const allRegressionTests = [
   ...batch1Tests,
   ...batch2Tests,
   ...batch3Tests,
   ...batch4Tests,
+  ...batch5Tests,
 ]

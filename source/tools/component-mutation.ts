@@ -68,6 +68,16 @@ export function unwrapPropertyDumpValue(value: unknown): unknown {
 }
 
 export function verifyComponentPropertyValue(actualValue: unknown, expectedValue: unknown, originalValue: unknown, strictReference: boolean = false): boolean {
+  if (Array.isArray(expectedValue) && Array.isArray(actualValue)) {
+    if (actualValue.length !== expectedValue.length)
+      return false
+    const expectedReferences = expectedValue.map(unwrapComponentReference)
+    const actualReferences = actualValue.map(unwrapComponentReference)
+    if (expectedReferences.every(reference => reference !== ''))
+      return actualReferences.every((reference, index) => reference === expectedReferences[index])
+    return JSON.stringify(actualValue) === JSON.stringify(expectedValue)
+  }
+
   const expectedRecord = typeof expectedValue === 'object' && expectedValue !== null
     ? expectedValue as Record<string, unknown>
     : null

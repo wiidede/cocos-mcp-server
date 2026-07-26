@@ -31,7 +31,7 @@ Use `pnpm typecheck` and `pnpm build` after TypeScript changes. The Dev Test Pan
 - Query UUIDs before writes. Node names are not unique.
 - Use `scene/query-node-tree` for editor hierarchy reads. Do not introduce unsupported message names such as `query-hierarchy`.
 - When removing a component, obtain its actual `componentType` or `cid` via `component_query` first.
-- Add or update a Dev Test regression for fixed editor integration bugs in `source/panels/dev-test/cases/regression/`.
+- Add or update a Dev Test regression for fixed editor integration bugs in `source/panels/dev-test/cases/regression/`. Export it from that directory’s `index.ts`; the Dev Test Panel registers `allRegressionTests` from this single aggregate, so do not add a separate registration/import list.
 
 ## Conventions
 

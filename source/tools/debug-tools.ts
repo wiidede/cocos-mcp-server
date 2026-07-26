@@ -353,13 +353,21 @@ export class DebugTools implements ToolExecutor {
           triangles: stats.triangles || 0,
           memory: stats.memory || {},
         }
-        resolve({ success: true, data: perfStats })
+        resolve({
+          success: true,
+          data: {
+            available: true,
+            stats: perfStats,
+          },
+        })
       }).catch(() => {
         // Fallback to basic stats
         resolve({
           success: true,
           data: {
-            message: 'Performance stats not available in edit mode',
+            available: false,
+            reason: 'Performance stats are not available in edit mode',
+            recommendedCollectionMethod: 'Run the project in Preview or on the target platform, then collect runtime profiler statistics from Cocos Creator.',
           },
         })
       })
