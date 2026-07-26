@@ -52,6 +52,39 @@ describe('unified tools', () => {
     ]))
   })
 
+  it('describes action-specific scene execution requirements', () => {
+    const tools = new UnifiedTools()
+    const execution = tools.getTools().find(tool => tool.name === 'scene_execution_control')
+
+    expect(execution?.description).toContain('For execute_component_method, `uuid` (the component instance UUID) and `name` (the component method name) are required.')
+    expect(execution?.inputSchema.anyOf).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        properties: { action: { type: 'string', enum: ['execute_component_method'] } },
+        required: ['action', 'uuid', 'name'],
+      }),
+      expect.objectContaining({
+        properties: { action: { type: 'string', enum: ['execute_scene_script'] } },
+        required: ['action', 'name', 'method'],
+      }),
+      expect.objectContaining({
+        properties: { action: { type: 'string', enum: ['restore_prefab'] } },
+        required: ['action', 'nodeUuid', 'assetUuid'],
+      }),
+      expect.objectContaining({
+        properties: { action: { type: 'string', enum: ['soft_reload'] } },
+        required: ['action'],
+      }),
+      expect.objectContaining({
+        properties: { action: { type: 'string', enum: ['query_ready'] } },
+        required: ['action'],
+      }),
+      expect.objectContaining({
+        properties: { action: { type: 'string', enum: ['query_dirty'] } },
+        required: ['action'],
+      }),
+    ]))
+  })
+
   it('rejects arbitrary debug scripts with actionable guidance', async () => {
     const tools = new UnifiedTools()
 

@@ -271,7 +271,7 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_execution_control',
-        'Run registered scene-side operations and readiness checks. execute_scene_script cannot evaluate JavaScript: name must identify an extension with a contributed scene script, and method must be exported from that scene script methods object. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
+        'Run registered scene-side operations and readiness checks. For execute_component_method, `uuid` (the component instance UUID) and `name` (the component method name) are required. execute_scene_script requires the extension package name and exported method; restore_prefab requires nodeUuid and assetUuid. execute_scene_script cannot evaluate arbitrary JavaScript. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
         ['execute_component_method', 'execute_scene_script', 'restore_prefab', 'soft_reload', 'query_ready', 'query_dirty'],
         ['uuid', 'nodeUuid', 'assetUuid', 'name', 'method', 'args'],
         args => this.routeLegacyAction('scene_execution_control', {
@@ -282,6 +282,14 @@ export class UnifiedTools {
           query_ready: 'sceneAdvanced_query_scene_ready',
           query_dirty: 'sceneAdvanced_query_scene_dirty',
         }, args),
+        [
+          { action: 'execute_component_method', required: ['uuid', 'name'] },
+          { action: 'execute_scene_script', required: ['name', 'method'] },
+          { action: 'restore_prefab', required: ['nodeUuid', 'assetUuid'] },
+          { action: 'soft_reload', required: [] },
+          { action: 'query_ready', required: [] },
+          { action: 'query_dirty', required: [] },
+        ],
       ),
       this.createTool(
         'scene_snapshot',
