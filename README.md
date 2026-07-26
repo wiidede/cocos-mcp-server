@@ -8,7 +8,8 @@
 
 ## 此 Fork 的改进
 
-- 使用统一工具注册表和 `action` schema，AI 可通过 `tools/list` 获取当前可调用契约。
+- 使用统一工具注册表和 action-specific schema；每个 action 只公开其允许参数，减少 AI 猜测字段和试错。AI 可通过 `tools/list` 获取当前可调用契约，并在复杂调用前使用 `tool_registry.describe` 获取必填字段、示例和能力状态。
+- `node_lifecycle.create` 支持创建节点时附加 `components`，以及 `initialTransform` 或顶层 `position` / `rotation` / `scale` 初始变换。
 - 补全并现代化项目、场景、节点、组件、预制体和资源管理能力。
 - 修复多项编辑器 IPC、组件属性和预制体操作的兼容性问题。
 - 提供 Dev Test Panel 与回归测试，防止已修复的编辑器集成问题再次出现。
@@ -48,7 +49,24 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp
 
 ## 工具调用
 
-工具使用统一的 `action` 参数。AI 客户端连接后会通过 MCP `tools/list` 自动获取当前工具、操作和参数 schema；这份 schema 是唯一权威来源。
+工具使用统一的 `action` 参数。AI 客户端连接后会通过 MCP `tools/list` 自动获取当前工具、操作和 **action-specific** 参数 schema；这份 schema 是唯一权威来源。复杂、低频或调用失败后，可使用 `tool_registry.describe` 查询某个工具中每个 action 的允许字段、必填字段、最小示例和能力状态。
+
+例如创建 3D 节点并直接添加组件：
+
+```json
+{
+  "name": "node_lifecycle",
+  "arguments": {
+    "action": "create",
+    "name": "MeshNode",
+    "nodeType": "3DNode",
+    "components": ["cc.MeshRenderer"],
+    "position": { "x": 0, "y": 1, "z": 0 }
+  }
+}
+```
+
+不要为一个 action 传入其他 action 的字段；schema 会在调用 Editor IPC 前返回精确的参数提示。
 
 ```json
 {
