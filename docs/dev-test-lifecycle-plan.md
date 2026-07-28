@@ -57,7 +57,7 @@ type TestEnvironment = 'agnostic' | 'scene' | 'prefab'
 
 测试元数据示例：
 
-```ts
+```text
 {
   name: 'mcp_reliability_01:remove_component_identity_guidance',
   environment: 'scene',
@@ -67,7 +67,7 @@ type TestEnvironment = 'agnostic' | 'scene' | 'prefab'
 
 真正验证 Prefab 打开行为的测试：
 
-```ts
+```text
 {
   name: 'batch4_05:prefab_browse_load_opens_prefab_editor',
   environment: 'prefab',
@@ -111,7 +111,7 @@ Prefab 测试如需创建 Prefab 资源，应在共享 TestScene 中准备源节
 
 新增测试运行级 Session，负责共享场景和资源生命周期。建议抽象为：
 
-```ts
+```text
 interface TestSession {
   scenePath: string
   initialEditorContext: EditorContextSnapshot
@@ -119,18 +119,18 @@ interface TestSession {
   trackedAssetUrls: Set<string>
   currentPrefabPath?: string
 
-  ensureSceneContext(): Promise<void>
-  ensurePrefabContext(prefabPath: string): Promise<void>
-  exitPrefabContext(): Promise<void>
-  trackNode(uuid: string): void
-  trackAsset(url: string): void
-  cleanup(): Promise<void>
+  ensureSceneContext: () => Promise<void>
+  ensurePrefabContext: (prefabPath: string) => Promise<void>
+  exitPrefabContext: () => Promise<void>
+  trackNode: (uuid: string) => void
+  trackAsset: (url: string) => void
+  cleanup: () => Promise<void>
 }
 ```
 
 `TestContext` 暴露最少的资源登记 API：
 
-```ts
+```text
 interface TestContext {
   ...
   trackNode(uuid: string): void
@@ -140,7 +140,7 @@ interface TestContext {
 
 测试创建资源后立即登记：
 
-```ts
+```text
 const nodeUuid = ...
 ctx.trackNode(nodeUuid)
 
@@ -179,7 +179,7 @@ ctx.trackAsset(prefabPath)
 
 Prefab 测试必须由 Runner 负责上下文恢复，而不是依赖测试作者手写清理：
 
-```ts
+```text
 try {
   await test.run(ctx)
 }
@@ -194,7 +194,7 @@ finally {
 
 `runAll` 和 `runOne` 外层还需要再执行一次兜底：
 
-```ts
+```text
 finally {
   await session.exitPrefabContext().catch(() => undefined)
   await session.cleanup().catch(() => undefined)

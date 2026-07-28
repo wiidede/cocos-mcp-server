@@ -195,6 +195,10 @@ export const batch4Tests: TestCase[] = [
       ctx.assert(createResponse?.success === true, createResponse?.error ?? 'prefab create failed')
       ctx.trackAsset(prefabPath)
 
+      // The test intentionally verifies prefab_browse.load, but the test
+      // session must perform the context switch first. Otherwise load's own
+      // open-asset call can hit Cocos' dirty-scene modal and block the test.
+      await ctx.ensurePrefabContext(prefabPath)
       const loadResponse = await ctx.callTool('prefab_browse', { action: 'load', prefabPath })
       const loaded = loadResponse?.success === true
         && loadResponse?.data?.uuid === createResponse?.data?.prefabUuid

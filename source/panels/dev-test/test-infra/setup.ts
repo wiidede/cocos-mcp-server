@@ -16,6 +16,7 @@ export interface TestContext {
   assert: (cond: any, message: string) => void
   scenePath: string
   nodeUuid: string
+  ensurePrefabContext: (prefabPath: string) => Promise<void>
   trackNode: (uuid: string) => void
   trackAsset: (url: string) => void
 }
@@ -36,11 +37,29 @@ export async function createTestSession(): Promise<TestSession> {
   const trackedAssetUrls = new Set<string>()
   let scenePrepared = false
   let sceneOpen = false
+  let currentAssetPath: string | null = null
+
+  const saveCurrentAssetIfDirty = async (): Promise<void> => {
+    if (!currentAssetPath)
+      return
+
+    const dirty = await Editor.Message.request('scene', 'query-dirty')
+    if (dirty !== true)
+      return
+
+    await Editor.Message.request('scene', 'save-scene')
+    const stillDirty = await Editor.Message.request('scene', 'query-dirty')
+    if (stillDirty === true)
+      throw new Error(`测试资源 '${currentAssetPath}' 保存后仍处于 modified 状态`)
+  }
 
   const ensureSceneContext = async () => {
     if (scenePrepared) {
-      if (!sceneOpen)
+      if (!sceneOpen) {
+        await saveCurrentAssetIfDirty()
         await Editor.Message.request('asset-db', 'open-asset', TEST_SCENE_PATH)
+        currentAssetPath = TEST_SCENE_PATH
+      }
       await waitForSceneReady()
       sceneOpen = true
       return
@@ -54,23 +73,32 @@ export async function createTestSession(): Promise<TestSession> {
       throw new Error(`setupTestScene: 创建场景失败: ${createResp?.error ?? JSON.stringify(createResp)}`)
     }
 
+    // The asset was created directly at TEST_SCENE_PATH, so opening it is not
+    // a Save As operation and does not require a save-location dialog.
+    await Editor.Message.request('asset-db', 'open-asset', TEST_SCENE_PATH)
     await waitForSceneReady()
     scenePrepared = true
     sceneOpen = true
+    currentAssetPath = TEST_SCENE_PATH
   }
 
   const exitPrefabContext = async () => {
     // Cocos 3.8 does not expose a stable public close-prefab message in this
-    // extension. Opening the owned Scene is the registered, supported route
-    // that restores normal Scene context after asset-db/open-asset.
+    // extension. Save the known test asset before opening the owned Scene;
+    // this uses save-scene, never save-as-scene, so no location dialog is
+    // required.
+    await saveCurrentAssetIfDirty()
     await Editor.Message.request('asset-db', 'open-asset', TEST_SCENE_PATH)
     await waitForSceneReady()
     sceneOpen = true
+    currentAssetPath = TEST_SCENE_PATH
   }
 
   const ensurePrefabContext = async (prefabPath: string) => {
+    await saveCurrentAssetIfDirty()
     await Editor.Message.request('asset-db', 'open-asset', prefabPath)
     sceneOpen = false
+    currentAssetPath = prefabPath
   }
 
   const createContext = (step: TestContext['step'], assert: TestContext['assert']): TestContext => ({
@@ -79,6 +107,7 @@ export async function createTestSession(): Promise<TestSession> {
     assert,
     scenePath: TEST_SCENE_PATH,
     nodeUuid: '',
+    ensurePrefabContext,
     trackNode: (uuid: string) => {
       if (uuid)
         trackedNodeUuids.add(uuid)
@@ -90,11 +119,26 @@ export async function createTestSession(): Promise<TestSession> {
   })
 
   const cleanup = async () => {
+    // First leave Prefab mode while the current asset is still known and can
+    // be saved. Do not save before deleting tracked Scene nodes: those
+    // deletions make TestScene dirty again.
     await exitPrefabContext().catch(() => undefined)
 
     for (const uuid of trackedNodeUuids) {
       await callTool('node_lifecycle', { action: 'delete', uuid }).catch(() => undefined)
     }
+
+    // Node cleanup changes the Scene, so this save must happen after all node
+    // mutations and immediately before closing the editor context.
+    await saveCurrentAssetIfDirty().catch(() => undefined)
+
+    // Do not delete the currently open Scene directly. Cocos may interpret
+    // asset-db/delete-asset on the active scene as closing dirty scene data
+    // and show a modal confirmation, even after save-scene completed.
+    await Editor.Message.request('scene', 'close-scene').catch(() => undefined)
+    sceneOpen = false
+    currentAssetPath = null
+
     for (const url of trackedAssetUrls) {
       await callTool('asset_manage', { action: 'delete', url }).catch(() => undefined)
     }

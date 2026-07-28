@@ -136,7 +136,11 @@ export class TestRunner {
 
     const environment: TestEnvironment = c.environment ?? 'scene'
     try {
-      if (environment === 'scene')
+      // Prefab tests often need to create their fixture node in the shared
+      // TestScene before opening the Prefab under test. The test itself can
+      // then call ctx.ensurePrefabContext() at the exact point where the
+      // editor-context transition is part of the scenario.
+      if (environment === 'scene' || environment === 'prefab')
         await session.ensureSceneContext()
       scenePath = session.scenePath
       const ctx: TestContext = session.createContext((n, ok, m) => step(n, ok, m), assert)

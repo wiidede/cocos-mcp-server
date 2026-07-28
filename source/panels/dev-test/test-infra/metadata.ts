@@ -39,6 +39,7 @@ export interface TestContext {
   assert: (cond: any, message: string) => void
   scenePath: string
   nodeUuid: string
+  ensurePrefabContext: (prefabPath: string) => Promise<void>
   trackNode: (uuid: string) => void
   trackAsset: (url: string) => void
 }
