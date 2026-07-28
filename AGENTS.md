@@ -29,8 +29,9 @@ Use `pnpm typecheck` and `pnpm build` after TypeScript changes. The Dev Test Pan
 - Public tools use an `action` argument. Keep the implementation, `UnifiedTools.getTools()` definition, and schema aligned.
 - `tools/list` is the public API contract. Update `TOOLS.md` only for durable calling rules, not a duplicated parameter inventory.
 - Query UUIDs before writes. Node names are not unique.
+- For Cocos Creator IPC messages, inspect the installed Creator version's built-in type definitions first (for example, `builtin/scene/@types/public.d.ts` inside the Creator installation), then verify the message handler/implementation. Treat Message Manager examples and prose as guidance only; they may be misleading or version-dependent.
 - Use `scene/query-node-tree` for editor hierarchy reads. Do not introduce unsupported message names such as `query-hierarchy`.
-- When removing a component, obtain its actual `componentType` or `cid` via `component_query` first.
+- When removing a component, query its actual component instance UUID via `component_query` first. Follow the built-in `RemoveComponentOptions` type: `scene/remove-component` takes the component UUID as `{ uuid: componentUuid }`, not the node UUID plus a component type.
 - Add or update a Dev Test regression for fixed editor integration bugs in `source/panels/dev-test/cases/regression/`. Export it from that directory’s `index.ts`; the Dev Test Panel registers `allRegressionTests` from this single aggregate, so do not add a separate registration/import list.
 
 ## Conventions

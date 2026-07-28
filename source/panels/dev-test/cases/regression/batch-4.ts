@@ -106,6 +106,7 @@ export const batch4Tests: TestCase[] = [
     name: 'batch4_04:prefab_create_and_validate_complete_asset',
     group: 'regression/batch-4',
     description: 'prefab_lifecycle.create 应首次写入完整 Prefab，prefab_browse.validate 应通过 query-path 读取并验证',
+    environment: 'scene',
     tags: ['regression', 'prefab', 'asset-db', 'critical'],
     regression: {
       bugId: 'v1.5.3-prefab-script-cid-and-validation',
@@ -167,6 +168,7 @@ export const batch4Tests: TestCase[] = [
     name: 'batch4_05:prefab_browse_load_opens_prefab_editor',
     group: 'regression/batch-4',
     description: 'prefab_browse.load 应通过 asset-db/open-asset 打开有效 Prefab，而不是调用不存在的 scene/load-asset',
+    environment: 'prefab',
     tags: ['regression', 'prefab', 'asset-db', 'critical'],
     regression: {
       bugId: 'v1.5.3-prefab-load-route',
@@ -182,6 +184,7 @@ export const batch4Tests: TestCase[] = [
       })
       const nodeUuid = nodeResponse?.data?.uuid ?? nodeResponse?.uuid
       ctx.assert(typeof nodeUuid === 'string' && nodeUuid.length > 0, nodeResponse?.error ?? 'create node returned no uuid')
+      ctx.trackNode(nodeUuid)
 
       const createResponse = await ctx.callTool('prefab_lifecycle', {
         action: 'create',
@@ -190,6 +193,7 @@ export const batch4Tests: TestCase[] = [
         prefabName: 'PrefabLoadRegression',
       })
       ctx.assert(createResponse?.success === true, createResponse?.error ?? 'prefab create failed')
+      ctx.trackAsset(prefabPath)
 
       const loadResponse = await ctx.callTool('prefab_browse', { action: 'load', prefabPath })
       const loaded = loadResponse?.success === true

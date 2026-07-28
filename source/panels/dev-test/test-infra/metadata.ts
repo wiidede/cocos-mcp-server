@@ -4,8 +4,11 @@
  * 为现有测试添加标签、分类等元数据，方便过滤和组织
  */
 
+export type TestEnvironment = 'agnostic' | 'scene' | 'prefab'
+
 export interface TestMetadata {
   name: string // 测试名称
+  environment?: TestEnvironment // 测试所需的编辑器上下文，默认 scene
   group: string // 测试分组
   description: string // 描述
   tags?: string[] // 标签：['core', 'critical', 'slow', 'flaky', 'regression']
@@ -36,6 +39,8 @@ export interface TestContext {
   assert: (cond: any, message: string) => void
   scenePath: string
   nodeUuid: string
+  trackNode: (uuid: string) => void
+  trackAsset: (url: string) => void
 }
 
 // 标签说明

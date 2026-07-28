@@ -164,6 +164,13 @@ describe('unified tools', () => {
       success: false,
       error: expect.stringContaining('does not accept: path'),
       instruction: expect.stringContaining('scenePath'),
+      metadata: {
+        category: 'contract',
+        retryable: true,
+        nextTool: 'tool_registry',
+        nextAction: 'describe',
+        retryWith: { toolName: 'scene_management', action: 'open' },
+      },
     })
     await expect(tools.execute('scene_management', { action: 'open' })).resolves.toMatchObject({
       success: false,

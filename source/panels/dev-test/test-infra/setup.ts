@@ -1,8 +1,8 @@
 /**
- * Dev Test Setup
+ * Dev Test setup and shared lifecycle.
  *
- * 创建/清理一个临时测试场景，避免污染用户项目。
- * 路径固定为 db://assets/__dev_test__/TestScene.scene。
+ * A runAll session owns one temporary Scene. Tests register resources they
+ * create; the session performs best-effort cleanup in a finally block.
  */
 
 import { callTool } from './tool-client'
@@ -16,83 +16,142 @@ export interface TestContext {
   assert: (cond: any, message: string) => void
   scenePath: string
   nodeUuid: string
+  trackNode: (uuid: string) => void
+  trackAsset: (url: string) => void
 }
 
-export async function setupTestScene(): Promise<TestContext> {
-  const steps: { name: string, ok: boolean, message?: string }[] = []
-  const step = (name: string, ok: boolean, message?: string) => {
-    steps.push({ name, ok, message })
-  }
-  const assert: TestContext['assert'] = (cond: any, message: string) => {
-    if (!cond) {
-      throw new Error(`Assertion failed: ${message}`)
+export interface TestSession {
+  scenePath: string
+  trackedNodeUuids: Set<string>
+  trackedAssetUrls: Set<string>
+  ensureSceneContext: () => Promise<void>
+  ensurePrefabContext: (prefabPath: string) => Promise<void>
+  exitPrefabContext: () => Promise<void>
+  createContext: (step: TestContext['step'], assert: TestContext['assert']) => TestContext
+  cleanup: () => Promise<void>
+}
+
+export async function createTestSession(): Promise<TestSession> {
+  const trackedNodeUuids = new Set<string>()
+  const trackedAssetUrls = new Set<string>()
+  let scenePrepared = false
+  let sceneOpen = false
+
+  const ensureSceneContext = async () => {
+    if (scenePrepared) {
+      if (!sceneOpen)
+        await Editor.Message.request('asset-db', 'open-asset', TEST_SCENE_PATH)
+      await waitForSceneReady()
+      sceneOpen = true
+      return
     }
+    const createResp = await callTool('scene_management', {
+      action: 'create',
+      savePath: TEST_SCENE_PATH,
+      autoCreateCanvas: false,
+    })
+    if (!createResp || createResp.success === false) {
+      throw new Error(`setupTestScene: 创建场景失败: ${createResp?.error ?? JSON.stringify(createResp)}`)
+    }
+
+    await waitForSceneReady()
+    scenePrepared = true
+    sceneOpen = true
   }
 
-  // 不主动 close 当前场景：在 general edit mode 下会被 Cocos 拒绝（控制台报错）。
-  // create-scene 会通过 editor API 强制覆盖打开，不依赖之前场景状态。
+  const exitPrefabContext = async () => {
+    // Cocos 3.8 does not expose a stable public close-prefab message in this
+    // extension. Opening the owned Scene is the registered, supported route
+    // that restores normal Scene context after asset-db/open-asset.
+    await Editor.Message.request('asset-db', 'open-asset', TEST_SCENE_PATH)
+    await waitForSceneReady()
+    sceneOpen = true
+  }
 
-  // 1) 创建新的空场景（强制 autoCreateCanvas=false，测试需要可控环境）
-  const createResp = await callTool('scene_management', {
-    action: 'create',
-    savePath: TEST_SCENE_PATH,
-    autoCreateCanvas: false,
+  const ensurePrefabContext = async (prefabPath: string) => {
+    await Editor.Message.request('asset-db', 'open-asset', prefabPath)
+    sceneOpen = false
+  }
+
+  const createContext = (step: TestContext['step'], assert: TestContext['assert']): TestContext => ({
+    callTool,
+    step,
+    assert,
+    scenePath: TEST_SCENE_PATH,
+    nodeUuid: '',
+    trackNode: (uuid: string) => {
+      if (uuid)
+        trackedNodeUuids.add(uuid)
+    },
+    trackAsset: (url: string) => {
+      if (url)
+        trackedAssetUrls.add(url)
+    },
   })
-  if (!createResp || createResp.success === false) {
-    throw new Error(`setupTestScene: 创建场景失败: ${createResp?.error ?? JSON.stringify(createResp)}`)
-  }
-  step('create test scene', true, TEST_SCENE_PATH)
 
-  // 2) 等待场景就绪
-  let ready = false
-  for (let i = 0; i < 20; i++) {
-    try {
-      const resp: any = await callTool('scene_query', { action: 'get_info' })
-      // sceneAdvanced_query_scene_info 返回 { success, data: { ready, dirty, ... } }
-      if (resp?.data?.ready === true) {
-        ready = true
-        break
-      }
-    }
-    catch {
-      // ignore
-    }
-    await sleep(150)
-  }
-  assert(ready, '场景在 3s 内未就绪')
-  step('scene ready', true)
+  const cleanup = async () => {
+    await exitPrefabContext().catch(() => undefined)
 
-  return { callTool, step, assert, scenePath: TEST_SCENE_PATH, nodeUuid: '' }
+    for (const uuid of trackedNodeUuids) {
+      await callTool('node_lifecycle', { action: 'delete', uuid }).catch(() => undefined)
+    }
+    for (const url of trackedAssetUrls) {
+      await callTool('asset_manage', { action: 'delete', url }).catch(() => undefined)
+    }
+
+    const sceneUuid = await getAssetUuidByPath(TEST_SCENE_PATH)
+    if (sceneUuid)
+      await Editor.Message.request('asset-db', 'delete-asset', sceneUuid).catch(() => undefined)
+    const dirUuid = await getAssetUuidByPath(TEST_DIR)
+    if (dirUuid)
+      await Editor.Message.request('asset-db', 'delete-asset', dirUuid).catch(() => undefined)
+  }
+
+  await ensureSceneContext()
+  return {
+    scenePath: TEST_SCENE_PATH,
+    trackedNodeUuids,
+    trackedAssetUrls,
+    ensureSceneContext,
+    ensurePrefabContext,
+    exitPrefabContext,
+    createContext,
+    cleanup,
+  }
+}
+
+/** Compatibility helper for callers that still need a one-test setup. */
+export async function setupTestScene(): Promise<TestContext> {
+  const session = await createTestSession()
+  const step = () => undefined
+  const assert: TestContext['assert'] = (cond, message) => {
+    if (!cond)
+      throw new Error(`Assertion failed: ${message}`)
+  }
+  return session.createContext(step, assert)
 }
 
 export async function teardownTestScene(): Promise<void> {
-  try {
-    // 不主动 close：general edit mode 下 Cocos 会拒绝并控制台报错。
-    // 测试场景的 UUID 已被删除，下次重新 create 时 editor API 会强制覆盖打开。
-    // 删除测试场景文件
+  // Kept for compatibility; Runner uses TestSession so cleanup also covers
+  // nodes and assets registered by tests.
+  const sceneUuid = await getAssetUuidByPath(TEST_SCENE_PATH)
+  if (sceneUuid)
+    await Editor.Message.request('asset-db', 'delete-asset', sceneUuid).catch(() => undefined)
+}
+
+async function waitForSceneReady(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
     try {
-      const sceneUuid = await getAssetUuidByPath(TEST_SCENE_PATH)
-      if (sceneUuid) {
-        await Editor.Message.request('asset-db', 'delete-asset', sceneUuid)
-      }
+      const response: any = await callTool('scene_query', { action: 'get_info' })
+      if (response?.data?.ready === true)
+        return
     }
     catch {
-      // ignore
+      // wait for the editor
     }
-    // 删除测试目录
-    try {
-      const dirUuid = await getAssetUuidByPath(TEST_DIR)
-      if (dirUuid) {
-        await Editor.Message.request('asset-db', 'delete-asset', dirUuid)
-      }
-    }
-    catch {
-      // ignore
-    }
+    await sleep(150)
   }
-  catch {
-    // ignore teardown errors
-  }
+  throw new Error('场景在 3s 内未就绪')
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -102,13 +161,13 @@ export function sleep(ms: number): Promise<void> {
 async function getAssetUuidByPath(dbPath: string): Promise<string | null> {
   try {
     const info: any = await Editor.Message.request('asset-db', 'query-asset-info', dbPath)
-    if (info && info.uuid)
+    if (info?.uuid)
       return info.uuid
-    if (info && info.asset && info.asset.uuid)
+    if (info?.asset?.uuid)
       return info.asset.uuid
   }
   catch {
-    // ignore
+    // ignore cleanup errors
   }
   return null
 }

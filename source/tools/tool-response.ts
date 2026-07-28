@@ -1,10 +1,11 @@
-import type { ToolResponse } from '../types'
+import type { ToolFailureMetadata, ToolResponse } from '../types'
 
 export interface ToolResponseOptions {
   data?: unknown
   message?: string
   instruction?: string
   warning?: string
+  metadata?: ToolFailureMetadata
   verificationData?: unknown
   updatedProperties?: string[]
 }

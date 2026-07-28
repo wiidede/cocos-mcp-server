@@ -37,6 +37,17 @@ export interface ToolDefinition {
   inputSchema: JsonSchema
 }
 
+export type ToolFailureCategory = 'contract' | 'target' | 'component' | 'asset' | 'ipc' | 'runtime' | 'unknown'
+
+export interface ToolFailureMetadata {
+  category: ToolFailureCategory
+  retryable?: boolean
+  nextTool?: string
+  nextAction?: string
+  retryWith?: Record<string, unknown>
+  attempted?: Record<string, unknown>
+}
+
 export interface ToolResponse {
   success: boolean
   data?: any
@@ -44,6 +55,7 @@ export interface ToolResponse {
   error?: string
   instruction?: string
   warning?: string
+  metadata?: ToolFailureMetadata
   verificationData?: any
   updatedProperties?: string[]
 }

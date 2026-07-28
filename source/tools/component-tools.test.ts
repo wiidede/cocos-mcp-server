@@ -9,7 +9,7 @@ describe('component tools', () => {
   it('removes a missing script by its component instance uuid', async () => {
     const request = vi.fn()
       .mockResolvedValueOnce({
-        __comps__: [{ __type__: 'cc.MissingScript', uuid: { value: 'missing-component-1' } }],
+        __comps__: [{ __type__: 'cc.MissingScript', cid: 'cc.MissingScript', uuid: { value: 'missing-component-1' } }],
       })
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce({ __comps__: [] })
@@ -28,8 +28,61 @@ describe('component tools', () => {
       },
     })
     expect(request).toHaveBeenNthCalledWith(2, 'scene', 'remove-component', {
-      uuid: 'node-1',
-      component: 'missing-component-1',
+      uuid: 'missing-component-1',
+    })
+  })
+
+  it('checks the script asset before attaching and avoids blind retries', async () => {
+    const request = vi.fn(async (channel: string, message: string, ...args: unknown[]) => {
+      if (channel === 'scene' && message === 'query-node')
+        return { __comps__: [] }
+      if (channel === 'asset-db' && message === 'query-asset-info')
+        return null
+      if (channel === 'asset-db' && message === 'query-path')
+        return 'db://assets/scripts/FarmPrototype.ts'
+      throw new Error(`Unexpected request: ${channel}/${message} ${JSON.stringify(args)}`)
+    })
+    vi.stubGlobal('Editor', { Message: { request } })
+
+    const result = await new ComponentTools().execute('attach_script', {
+      nodeUuid: 'node-1',
+      scriptPath: 'db://assets/scripts/FarmPrototype.ts',
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('is not available in the Cocos asset database'),
+      metadata: {
+        category: 'asset',
+        nextTool: 'project_manage',
+        nextAction: 'refresh_assets',
+      },
+    })
+    expect(request).not.toHaveBeenCalledWith('scene', 'create-component', expect.anything())
+  })
+  it('explains component identity when removal target is missing', async () => {
+    const request = vi.fn().mockResolvedValue({
+      __comps__: [{ cid: 'cc.Camera', uuid: { value: 'camera-component-1' } }],
+    })
+    vi.stubGlobal('Editor', { Message: { request } })
+
+    const result = await new ComponentTools().execute('remove_component', {
+      nodeUuid: 'node-1',
+      componentType: 'wrong-component-id',
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      data: {
+        requestedComponent: 'wrong-component-id',
+        availableComponents: [{ uuid: 'camera-component-1', type: 'cc.Camera' }],
+      },
+      metadata: {
+        category: 'component',
+        nextTool: 'component_query',
+        nextAction: 'get_components',
+      },
+      instruction: expect.stringContaining('component instance uuid'),
     })
   })
 

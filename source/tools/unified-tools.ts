@@ -572,7 +572,7 @@ export class UnifiedTools {
         {},
         [
           { name: 'add', description: 'Add a component to a node.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'add', nodeUuid: '<node-uuid>', componentType: 'cc.Camera' } },
-          { name: 'remove', description: 'Remove a component from a node. Prefer its instance UUID from component_query.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'] },
+          { name: 'remove', description: 'Remove a component from a node. First call component_query.get_components. Pass the component instance `uuid` returned there when available; `type`/`cid` are fallback identities only.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'remove', nodeUuid: '<node-uuid>', componentType: '<component-instance-uuid>' } },
         ],
       ),
       this.createTool(
@@ -587,7 +587,7 @@ export class UnifiedTools {
         {},
         [
           { name: 'attach', description: 'Attach a script component to a node.', properties: ['nodeUuid', 'scriptPath'], required: ['nodeUuid', 'scriptPath'], example: { action: 'attach', nodeUuid: '<node-uuid>', scriptPath: 'db://assets/scripts/Player.ts' } },
-          { name: 'detach', description: 'Detach a script component from a node.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'] },
+          { name: 'detach', description: 'Detach a script component from a node. First call component_query.get_components and pass the script component instance `uuid` as componentType; do not pass the script asset UUID.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'detach', nodeUuid: '<node-uuid>', componentType: '<script-component-instance-uuid>' } },
         ],
       ),
       this.createTool(
@@ -1262,6 +1262,7 @@ export class UnifiedTools {
     const action = args.action
     if (typeof action !== 'string' || !action) {
       return toolFailure(`${toolName} requires an action parameter`, {
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName } },
         instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${specs.filter(spec => spec.status !== 'unsupported').map(spec => spec.name).join(', ')}.`,
       })
     }
@@ -1269,6 +1270,7 @@ export class UnifiedTools {
     const spec = specs.find(item => item.name === action)
     if (!spec) {
       return toolFailure(`Unsupported action '${action}' for ${toolName}`, {
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName } },
         instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${specs.filter(item => item.status !== 'unsupported').map(item => item.name).join(', ')}.`,
       })
     }
@@ -1276,6 +1278,7 @@ export class UnifiedTools {
     if (spec.status === 'unsupported') {
       return toolFailure(`Action '${action}' is unsupported for ${toolName}`, {
         data: { toolName, action, status: spec.status, reason: spec.unsupportedReason },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName } },
         instruction: spec.unsupportedReason || `Call tool_registry.describe with toolName="${toolName}" to choose a supported action.`,
       })
     }
@@ -1285,6 +1288,7 @@ export class UnifiedTools {
     if (unexpected.length > 0) {
       return toolFailure(`Action '${action}' for ${toolName} does not accept: ${unexpected.join(', ')}`, {
         data: { toolName, action, allowedProperties: [...allowed] },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action } },
         instruction: `Remove ${unexpected.join(', ')}. Allowed fields: ${[...allowed].join(', ')}. Call tool_registry.describe with toolName="${toolName}" for the complete contract.`,
       })
     }
@@ -1293,6 +1297,7 @@ export class UnifiedTools {
     if (missing.length > 0) {
       return toolFailure(`Action '${action}' for ${toolName} requires: ${missing.join(', ')}`, {
         data: { toolName, action, missing, required: spec.required },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action } },
         instruction: `Add ${missing.join(', ')} and retry. Call tool_registry.describe with toolName="${toolName}" for an example.`,
       })
     }
@@ -1301,6 +1306,7 @@ export class UnifiedTools {
       const alternatives = spec.requiredAnyOf.map(group => group.join(' + ')).join(' or ')
       return toolFailure(`Action '${action}' for ${toolName} requires one of: ${alternatives}`, {
         data: { toolName, action, requiredAnyOf: spec.requiredAnyOf },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action } },
         instruction: `Add ${alternatives} and retry. Call tool_registry.describe with toolName="${toolName}" for an example.`,
       })
     }
@@ -1337,11 +1343,11 @@ export class UnifiedTools {
   }
 
   private withFailureInstruction(result: ToolResponse, toolName: string, action: string, args: ToolArguments): ToolResponse {
-    if (result.success || result.instruction) {
+    if (result.success) {
       return result
     }
 
-    const instruction = this.getFailureInstruction(toolName, action, result.error || '', args)
+    const instruction = result.instruction || this.getFailureInstruction(toolName, action, result.error || '', args)
     if (!instruction) {
       return result
     }
@@ -1349,7 +1355,27 @@ export class UnifiedTools {
     return {
       ...result,
       instruction,
+      metadata: result.metadata ?? this.getFailureMetadata(toolName, action, result.error || '', args),
     }
+  }
+
+  private getFailureMetadata(toolName: string, action: string, error: string, args: ToolArguments): import('../types').ToolResponse['metadata'] {
+    const lowerError = error.toLowerCase()
+    const attempted = { action, ...args }
+
+    if (lowerError.includes('not found') && (toolName.startsWith('component') || lowerError.includes('component'))) {
+      return { category: 'component', retryable: true, nextTool: 'component_query', nextAction: 'get_components', retryWith: { nodeUuid: args.nodeUuid }, attempted }
+    }
+    if (lowerError.includes('node') && (lowerError.includes('not found') || lowerError.includes('failed'))) {
+      return { category: 'target', retryable: true, nextTool: 'node_query', nextAction: 'get_info', retryWith: { uuid: args.nodeUuid ?? args.uuid }, attempted }
+    }
+    if (toolName.startsWith('asset') || toolName.startsWith('project_asset') || toolName.startsWith('project_query') || lowerError.includes('asset')) {
+      return { category: 'asset', retryable: true, nextTool: 'asset_query', nextAction: 'details', retryWith: { urlOrUUID: args.urlOrUUID ?? args.url ?? args.assetPath ?? args.uuid }, attempted }
+    }
+    if (lowerError.includes('editor.message') || lowerError.includes('ipc') || lowerError.includes('message')) {
+      return { category: 'ipc', retryable: true, nextTool: 'debug_logs', nextAction: 'search', attempted }
+    }
+    return { category: 'unknown', retryable: false, attempted }
   }
 
   private getFailureInstruction(toolName: string, action: string, error: string, args: ToolArguments): string | undefined {

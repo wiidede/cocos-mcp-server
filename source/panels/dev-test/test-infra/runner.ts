@@ -3,9 +3,9 @@
  * 注册/执行/记录测试用例。串行执行，setup/teardown 真实场景。
  */
 
-import type { TestCase } from './metadata'
-import type { TestContext } from './setup'
-import { setupTestScene, sleep, teardownTestScene } from './setup'
+import type { TestCase, TestEnvironment } from './metadata'
+import type { TestContext, TestSession } from './setup'
+import { createTestSession, sleep } from './setup'
 
 export type TestStatus = 'pending' | 'running' | 'pass' | 'fail' | 'skip'
 
@@ -81,10 +81,17 @@ export class TestRunner {
       }
     }
     this.running = true
-    const result = await this.execute(c)
-    this.results.set(name, result)
-    this.running = false
-    return result
+    let session: TestSession | undefined
+    try {
+      session = await createTestSession()
+      const result = await this.execute(c, session)
+      this.results.set(name, result)
+      return result
+    }
+    finally {
+      await session?.cleanup().catch(() => undefined)
+      this.running = false
+    }
   }
 
   async runAll(onProgress?: (result: TestResult) => void): Promise<TestResult[]> {
@@ -92,10 +99,12 @@ export class TestRunner {
       throw new Error('TestRunner is already running')
     }
     this.running = true
+    let session: TestSession | undefined
     try {
+      session = await createTestSession()
       const results: TestResult[] = []
-      for (const c of this.cases) {
-        const r = await this.execute(c)
+      for (const c of this.sortByEnvironment(this.cases)) {
+        const r = await this.execute(c, session)
         this.results.set(c.name, r)
         results.push(r)
         onProgress?.(r)
@@ -103,11 +112,12 @@ export class TestRunner {
       return results
     }
     finally {
+      await session?.cleanup().catch(() => undefined)
       this.running = false
     }
   }
 
-  private async execute(c: TestCase): Promise<TestResult> {
+  private async execute(c: TestCase, session: TestSession): Promise<TestResult> {
     const start = Date.now()
     const steps: TestStep[] = []
     const step = (name: string, ok: boolean, message?: string) => {
@@ -124,19 +134,12 @@ export class TestRunner {
     let stack: string | null = null
     let scenePath = ''
 
+    const environment: TestEnvironment = c.environment ?? 'scene'
     try {
-      const setup = await setupTestScene()
-      scenePath = setup.scenePath
-      const ctx: TestContext = {
-        callTool: setup.callTool,
-        step: (n, ok, m) => {
-          step(n, ok, m)
-          setup.step(n, ok, m)
-        },
-        assert: setup.assert,
-        scenePath: setup.scenePath,
-        nodeUuid: setup.nodeUuid,
-      }
+      if (environment === 'scene')
+        await session.ensureSceneContext()
+      scenePath = session.scenePath
+      const ctx: TestContext = session.createContext((n, ok, m) => step(n, ok, m), assert)
       await c.run(ctx)
     }
     catch (e: any) {
@@ -145,12 +148,8 @@ export class TestRunner {
       stack = e?.stack ?? null
     }
     finally {
-      try {
-        await teardownTestScene()
-      }
-      catch {
-        // 忽略清理错误
-      }
+      if (environment === 'prefab')
+        await session.exitPrefabContext().catch(() => undefined)
     }
 
     return {
@@ -164,6 +163,11 @@ export class TestRunner {
       steps,
       scenePath,
     }
+  }
+
+  private sortByEnvironment(cases: TestCase[]): TestCase[] {
+    const order: Record<TestEnvironment, number> = { agnostic: 0, scene: 1, prefab: 2 }
+    return [...cases].sort((a, b) => (order[a.environment ?? 'scene'] - order[b.environment ?? 'scene']))
   }
 
   // 新增：按标签过滤运行测试
@@ -183,10 +187,12 @@ export class TestRunner {
       throw new Error('TestRunner is already running')
     }
     this.running = true
+    let session: TestSession | undefined
     try {
+      session = await createTestSession()
       const results: TestResult[] = []
-      for (const c of filtered) {
-        const r = await this.execute(c)
+      for (const c of this.sortByEnvironment(filtered)) {
+        const r = await this.execute(c, session)
         this.results.set(c.name, r)
         results.push(r)
         onProgress?.(r)
@@ -194,6 +200,7 @@ export class TestRunner {
       return results
     }
     finally {
+      await session?.cleanup().catch(() => undefined)
       this.running = false
     }
   }

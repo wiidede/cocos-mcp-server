@@ -43,7 +43,7 @@ export class ComponentTools implements ToolExecutor {
       },
       {
         name: 'remove_component',
-        description: 'Remove a component from a node. Use the component instance uuid returned by get_components when available; type and cid are also accepted.',
+        description: 'Remove a component from a node. You may provide the component instance uuid, type, or cid returned by get_components. The tool resolves the target component and sends its instance uuid to Cocos scene/remove-component.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -53,7 +53,7 @@ export class ComponentTools implements ToolExecutor {
             },
             componentType: {
               type: 'string',
-              description: 'Component instance uuid, type, or cid returned by get_components. The instance uuid is required when removing cc.MissingScript without a cid.',
+              description: 'Component instance uuid, type, or cid returned by get_components. The resolved component instance uuid is sent to Cocos scene/remove-component.',
             },
           },
           required: ['nodeUuid', 'componentType'],
@@ -441,41 +441,75 @@ export class ComponentTools implements ToolExecutor {
       // 1. 查找节点上的所有组件
       const allComponentsInfo = await this.getComponents(nodeUuid)
       if (!allComponentsInfo.success || !allComponentsInfo.data?.components) {
-        resolve({ success: false, error: `Failed to get components for node '${nodeUuid}': ${allComponentsInfo.error}` })
+        resolve(toolFailure(`Failed to get components for node '${nodeUuid}': ${allComponentsInfo.error}`, {
+          metadata: { category: 'target', retryable: true, nextTool: 'component_query', nextAction: 'get_components', retryWith: { nodeUuid }, attempted: { nodeUuid, componentType } },
+          instruction: `Call component_query.get_components with nodeUuid='${nodeUuid}' before retrying removal.`,
+        }))
         return
       }
       const component = allComponentsInfo.data.components.find((candidate: unknown) =>
         getComponentSceneId(candidate) === componentType || componentMatchesType(candidate, componentType),
       )
       if (!component) {
-        resolve({ success: false, error: `Component '${componentType}' not found on node '${nodeUuid}'. Use component_query.get_components and pass its uuid, type, or cid.` })
+        resolve(toolFailure(`Component '${componentType}' not found on node '${nodeUuid}'.`, {
+          data: { nodeUuid, requestedComponent: componentType, availableComponents: allComponentsInfo.data.components.map((candidate: unknown) => ({ uuid: getComponentSceneId(candidate), type: getComponentType(candidate) })) },
+          metadata: { category: 'component', retryable: true, nextTool: 'component_query', nextAction: 'get_components', retryWith: { nodeUuid }, attempted: { nodeUuid, componentType } },
+          instruction: 'Use the component instance uuid, type, or cid returned by component_query.get_components. For removal, prefer the component uuid rather than its type.',
+        }))
         return
       }
       const componentUuid = getComponentSceneId(component)
-      const removalIdentity = componentUuid ?? getComponentType(component)
-      if (!removalIdentity) {
-        resolve({ success: false, error: `Component '${componentType}' has no removable uuid or type identity.` })
+      // Cocos Creator 3.8's scene/remove-component message expects the
+      // component instance UUID in `uuid`. The component class/type is not
+      // used by this message.
+      if (!componentUuid) {
+        resolve(toolFailure(`Component '${componentType}' has no removable instance uuid.`, {
+          data: { nodeUuid, requestedComponent: componentType, component: summarizeComponent(component, false) },
+          metadata: { category: 'component', retryable: false, attempted: { nodeUuid, componentType } },
+          instruction: 'Query the node components and use the component instance uuid returned by component_query.get_components. Cocos scene/remove-component requires that UUID.',
+        }))
         return
       }
       try {
         await Editor.Message.request('scene', 'remove-component', {
-          uuid: nodeUuid,
-          component: removalIdentity,
+          uuid: componentUuid,
         })
         const afterRemoveInfo = await this.getComponents(nodeUuid)
-        const stillExists = afterRemoveInfo.success && afterRemoveInfo.data?.components?.some((candidate: unknown) =>
-          componentUuid
-            ? getComponentSceneId(candidate) === componentUuid
-            : componentMatchesType(candidate, componentType),
-        )
+        const stillExists = afterRemoveInfo.success === true
+          && afterRemoveInfo.data?.components?.some((candidate: unknown) =>
+            componentUuid
+              ? getComponentSceneId(candidate) === componentUuid
+              : componentMatchesType(candidate, componentType),
+          ) === true
         if (stillExists) {
-          resolve({ success: false, error: `Component '${componentType}' was not removed from node '${nodeUuid}'.` })
+          resolve(toolFailure(`Component '${componentType}' was not removed from node '${nodeUuid}'. Cocos component uuid: '${componentUuid}'. The removal request returned, but verification still found the target component.`, {
+            data: {
+              nodeUuid,
+              requestedComponent: componentType,
+              removalIdentity: componentUuid,
+              componentUuid,
+              componentBefore: summarizeComponent(component, false),
+              componentsAfter: afterRemoveInfo.data?.components ?? [],
+              verification: {
+                queried: afterRemoveInfo.success === true,
+                targetStillPresent: true,
+              },
+            },
+            metadata: { category: 'component', retryable: true, nextTool: 'component_query', nextAction: 'get_components', retryWith: { nodeUuid }, attempted: { nodeUuid, componentType, componentUuid, removalIdentity: componentUuid } },
+            instruction: 'The editor accepted the removal request but the component was still present during verification. Query the node components again before retrying; do not repeat the same removal request unchanged.',
+          }))
         }
         else {
           resolve({
             success: true,
             message: `Component '${componentType}' removed successfully from node '${nodeUuid}'`,
-            data: { nodeUuid, componentType: getComponentType(component), componentUuid },
+            data: {
+              nodeUuid,
+              componentType: getComponentType(component),
+              componentUuid,
+              component: summarizeComponent(component, false),
+              removalIdentity: componentUuid,
+            },
           })
         }
       }
@@ -1359,11 +1393,50 @@ export class ComponentTools implements ToolExecutor {
       // 从脚本路径提取组件类名
       const scriptName = scriptPath.split('/').pop()?.replace('.ts', '').replace('.js', '')
       if (!scriptName) {
-        resolve({ success: false, error: 'Invalid script path' })
+        resolve(toolFailure('Invalid script path', {
+          metadata: { category: 'contract', retryable: false, attempted: { nodeUuid, scriptPath } },
+          instruction: 'Pass the exact imported script asset URL, for example db://assets/scripts/Player.ts.',
+        }))
+        return
+      }
+      // Confirm the node before mutating it. This prevents an invalid scene UUID
+      // from being confused with an asset registration problem.
+      const allComponentsInfo = await this.getComponents(nodeUuid)
+      if (!allComponentsInfo.success || !allComponentsInfo.data?.components) {
+        resolve(toolFailure(`Cannot attach script '${scriptName}': target node '${nodeUuid}' could not be queried.`, {
+          data: { nodeUuid, scriptPath },
+          metadata: { category: 'target', retryable: true, nextTool: 'node_query', nextAction: 'get_info', retryWith: { uuid: nodeUuid }, attempted: { nodeUuid, scriptPath } },
+          instruction: `Call node_query.get_info with uuid='${nodeUuid}' to confirm the exact target node, then retry attach.`,
+        }))
+        return
+      }
+      // Confirm that Cocos has imported and registered the script before
+      // create-component. Otherwise the editor may accept the request but add
+      // no component, forcing the caller into blind retries.
+      let scriptAssetPath: string | null = null
+      let scriptAssetInfo: unknown = null
+      try {
+        // query-path alone is not authoritative: Creator can return the input
+        // db:// URL for an unknown asset. Require asset metadata as well.
+        scriptAssetInfo = await requestAssetDb('query-asset-info', scriptPath)
+        scriptAssetPath = await requestAssetDb('query-path', scriptPath)
+      }
+      catch {
+        scriptAssetPath = null
+        scriptAssetInfo = null
+      }
+      // `asset-db.query-path` can echo an unresolved db:// URL in some
+      // Creator versions. The metadata check also prevents a fabricated path
+      // from being treated as proof that the script is registered.
+      if (!scriptAssetInfo || typeof scriptAssetPath !== 'string' || !scriptAssetPath || scriptAssetPath.startsWith('db://')) {
+        resolve(toolFailure(`Script asset '${scriptPath}' is not available in the Cocos asset database.`, {
+          data: { nodeUuid, scriptPath, scriptName, assetReady: false },
+          metadata: { category: 'asset', retryable: true, nextTool: 'project_manage', nextAction: 'refresh_assets', retryWith: { folder: scriptPath.substring(0, scriptPath.lastIndexOf('/')) || undefined }, attempted: { nodeUuid, scriptPath } },
+          instruction: `Call project_manage.refresh_assets, then asset_query.query_path with url='${scriptPath}'. Retry component_script.attach only after query_path returns a filesystem path.`,
+        }))
         return
       }
       // 先查找节点上是否已存在该脚本组件
-      const allComponentsInfo = await this.getComponents(nodeUuid)
       if (allComponentsInfo.success && allComponentsInfo.data?.components) {
         // 改进查找逻辑：同时检查 type、name 和 cid 字段
         const existingScript = allComponentsInfo.data.components.find((comp: unknown) => isScriptComponent(comp, scriptName))
@@ -1406,17 +1479,23 @@ export class ComponentTools implements ToolExecutor {
             })
           }
           else {
-            resolve({
-              success: false,
-              error: `Script '${scriptName}' was not found on node after addition. Available components: ${allComponentsInfo2.data.components.map((component: unknown) => getComponentType(component) ?? 'Unknown').join(', ')}`,
-            })
+            resolve(toolFailure(`Script '${scriptName}' was not found on node after addition.`, {
+              data: {
+                nodeUuid,
+                scriptPath,
+                scriptName,
+                availableComponents: allComponentsInfo2.data.components.map((component: unknown) => ({ uuid: getComponentSceneId(component), type: getComponentType(component) })),
+              },
+              metadata: { category: 'asset', retryable: true, nextTool: 'asset_query', nextAction: 'query_path', retryWith: { url: scriptPath }, attempted: { nodeUuid, scriptPath } },
+              instruction: `The node exists but Cocos did not register the script. Call asset_query.query_path with url='${scriptPath}'. If missing, call project_manage.refresh_assets, then retry attach. Do not repeat attach before verifying the asset.`,
+            }))
           }
         }
         else {
-          resolve({
-            success: false,
-            error: `Failed to verify script addition: ${allComponentsInfo2.error || 'Unable to get node components'}`,
-          })
+          resolve(toolFailure(`Failed to verify script addition: ${allComponentsInfo2.error || 'Unable to get node components'}`, {
+            metadata: { category: 'target', retryable: true, nextTool: 'component_query', nextAction: 'get_components', retryWith: { nodeUuid }, attempted: { nodeUuid, scriptPath } },
+            instruction: `Call component_query.get_components with nodeUuid='${nodeUuid}' to confirm the target before retrying. If valid, verify the script with asset_query.query_path first.`,
+          }))
         }
       }).catch((err: Error) => {
         // 备用方案：使用场景脚本
