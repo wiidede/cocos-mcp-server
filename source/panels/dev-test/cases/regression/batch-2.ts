@@ -93,17 +93,24 @@ async function addComponentSafely(
 
 /** 调 create_default_spriteframe（走 asset_manage 统一工具） */
 async function createDefaultSpriteframe(
-  ctx: { callTool: (n: string, a: any) => Promise<any>, step: (n: string, ok: boolean, m?: string) => void, assert: (c: any, m: string) => void },
+  ctx: { callTool: (n: string, a: any) => Promise<any>, step: (n: string, ok: boolean, m?: string) => void, assert: (c: any, m: string) => void, trackAsset: (url: string) => void },
   args: { color?: string, size?: number, savePath?: string } = {},
 ): Promise<{ spriteFrameUuid: string, pngPath: string, pngUuid?: string, color?: any, size?: number, cached?: boolean } | null> {
+  const testTextureDir = 'db://assets/__dev_test__/default_textures'
+  const testArgs = {
+    ...args,
+    savePath: args.savePath || `${testTextureDir}/texture_${args.color?.replace(/[^a-z0-9]/gi, '') || 'white'}_${args.size || 4}px.png`,
+  }
   const resp: any = await ctx.callTool('asset_manage', {
     action: 'create_default_spriteframe',
-    ...args,
+    ...testArgs,
   })
   if (resp?.success === false || !resp?.data?.spriteFrameUuid) {
     ctx.step('create_default_spriteframe', false, resp?.error?.slice(0, 200) ?? 'no uuid')
     return null
   }
+  if (typeof resp.data.pngPath === 'string')
+    ctx.trackAsset(resp.data.pngPath)
   ctx.step('create_default_spriteframe', true, `${resp.data.pngPath} -> ${resp.data.spriteFrameUuid}`)
   return resp.data
 }

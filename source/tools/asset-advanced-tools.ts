@@ -809,7 +809,11 @@ export class AssetAdvancedTools implements ToolExecutor {
       }
       if (!sameContent) {
         fs.writeFileSync(absPath, buffer)
-        await Editor.Message.request('asset-db', 'refresh', targetPath)
+        // A direct filesystem write is not guaranteed to be picked up by the
+        // asset-db watcher immediately. Use the targeted refresh-asset route;
+        // unlike the old broad refresh message, it does not reload the active
+        // scene/editor context.
+        await requestAssetDb('refresh-asset', targetPath)
       }
       // Wait for import (poll up to 5s)
       let info = await requestAssetDb('query-asset-info', targetPath).catch(() => null)

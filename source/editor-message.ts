@@ -70,6 +70,7 @@ interface SceneRequestMap {
 }
 
 interface AssetDbRequestMap {
+  'refresh-asset': { args: [url: string], result: void }
   'open-asset': { args: [urlOrUuid: string], result: void }
   'query-asset-info': { args: [urlOrUuid: string], result: AssetDbAssetInfo | null }
   'query-assets': { args: [options: { pattern: string }], result: AssetDbAssetInfo[] }
