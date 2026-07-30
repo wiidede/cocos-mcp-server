@@ -39,6 +39,15 @@ export interface ToolDefinition {
 
 export type ToolFailureCategory = 'contract' | 'target' | 'component' | 'asset' | 'ipc' | 'runtime' | 'unknown'
 
+export type ToolErrorCode
+  = | 'TOOL_CONTRACT_ERROR'
+    | 'TOOL_TARGET_ERROR'
+    | 'TOOL_COMPONENT_ERROR'
+    | 'TOOL_ASSET_ERROR'
+    | 'TOOL_IPC_ERROR'
+    | 'TOOL_RUNTIME_ERROR'
+    | 'TOOL_EXECUTION_ERROR'
+
 export interface ToolFailureMetadata {
   category: ToolFailureCategory
   retryable?: boolean
@@ -46,10 +55,12 @@ export interface ToolFailureMetadata {
   nextAction?: string
   retryWith?: Record<string, unknown>
   attempted?: Record<string, unknown>
+  allowed?: string[]
 }
 
 export interface ToolResponse {
   success: boolean
+  errorCode?: ToolErrorCode
   data?: any
   message?: string
   error?: string

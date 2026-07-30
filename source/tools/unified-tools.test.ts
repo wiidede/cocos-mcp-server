@@ -1,4 +1,5 @@
-import type { JsonSchema } from '../types'
+import type { JsonSchema, ToolExecutor } from '../types'
+import type { LegacyExecutorOverrides, LegacyPrefix } from './unified-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UnifiedTools } from './unified-tools'
 
@@ -27,7 +28,10 @@ describe('unified tools', () => {
 
     await expect(tools.execute('scene_management', null)).resolves.toMatchObject({
       success: false,
+      errorCode: 'TOOL_CONTRACT_ERROR',
       error: 'Tool scene_management requires an object argument',
+      data: { toolName: 'scene_management', attempted: null, allowedProperties: ['action'] },
+      metadata: { category: 'contract', allowed: ['action'] },
     })
   })
 
@@ -85,11 +89,11 @@ describe('unified tools', () => {
     const tools = new UnifiedTools()
     const nodeQuery = tools.getTools().find(tool => tool.name === 'node_query')
     const componentQuery = tools.getTools().find(tool => tool.name === 'component_query')
-    const projectQuery = tools.getTools().find(tool => tool.name === 'project_query')
+    const assetQuery = tools.getTools().find(tool => tool.name === 'asset_query')
 
     const nodeInfo = nodeQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get_info')
     const componentInfo = componentQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get_info')
-    const assetUrl = projectQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'asset_url')
+    const assetUrl = assetQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'query_url')
 
     expect(nodeInfo).toMatchObject({ required: ['action', 'uuid'], additionalProperties: false })
     expect(componentInfo).toMatchObject({ required: ['action', 'nodeUuid', 'componentType'], additionalProperties: false })
@@ -162,7 +166,12 @@ describe('unified tools', () => {
 
     await expect(tools.execute('scene_management', { action: 'open', path: 'db://assets/Main.scene' })).resolves.toMatchObject({
       success: false,
+      errorCode: 'TOOL_CONTRACT_ERROR',
       error: expect.stringContaining('does not accept: path'),
+      data: {
+        attempted: { action: 'open', path: 'db://assets/Main.scene' },
+        allowedProperties: ['action', 'scenePath'],
+      },
       instruction: expect.stringContaining('scenePath'),
       metadata: {
         category: 'contract',
@@ -170,6 +179,8 @@ describe('unified tools', () => {
         nextTool: 'tool_registry',
         nextAction: 'describe',
         retryWith: { toolName: 'scene_management', action: 'open' },
+        attempted: { action: 'open', path: 'db://assets/Main.scene' },
+        allowed: ['action', 'scenePath'],
       },
     })
     await expect(tools.execute('scene_management', { action: 'open' })).resolves.toMatchObject({
@@ -241,6 +252,206 @@ describe('unified tools', () => {
       }
       expect(propertyNames, `${tool.name} flat compatibility properties`).toEqual(new Set([...branchPropertyNames]))
     }
+  })
+
+  it('dispatches every supported action example beyond the public contract guard', async () => {
+    const calls: Array<{ prefix: LegacyPrefix, operation: string, args: unknown }> = []
+    const prefixes: LegacyPrefix[] = [
+      'sceneAdvanced',
+      'sceneView',
+      'referenceImage',
+      'assetAdvanced',
+      'validation',
+      'scene',
+      'node',
+      'component',
+      'prefab',
+      'project',
+      'debug',
+      'preferences',
+      'server',
+      'broadcast',
+    ]
+    const overrides = Object.fromEntries(prefixes.map(prefix => [
+      prefix,
+      {
+        getTools: () => [],
+        execute: async (operation: string, args: unknown) => {
+          calls.push({ prefix, operation, args })
+          return { success: true, data: { operation, args } }
+        },
+      } satisfies ToolExecutor,
+    ])) as LegacyExecutorOverrides
+    vi.stubGlobal('Editor', {
+      Message: { request: vi.fn(async () => null) },
+    })
+    const tools = new UnifiedTools({}, overrides)
+
+    let exampleCount = 0
+    for (const tool of tools.getTools()) {
+      const registry = await tools.execute('tool_registry', { action: 'describe', toolName: tool.name })
+      const actions = ((registry.data as { actions?: RegistryAction[] }).actions ?? [])
+        .filter(action => action.status !== 'unsupported' && action.example)
+
+      for (const action of actions) {
+        exampleCount += 1
+        const callCount = calls.length
+        const result = await tools.execute(tool.name, action.example)
+        expect(result.errorCode, `${tool.name}.${action.name} example must pass the contract`).not.toBe('TOOL_CONTRACT_ERROR')
+        if (calls.length > callCount) {
+          expect(calls.at(-1)?.args, `${tool.name}.${action.name} legacy payload`).toEqual(
+            Object.fromEntries(Object.entries(action.example!).filter(([key]) => key !== 'action')),
+          )
+        }
+      }
+    }
+
+    expect(exampleCount).toBeGreaterThan(0)
+    expect(calls.length).toBeGreaterThan(0)
+  })
+
+  it('hides legacy asset wrappers while keeping them directly callable and describable', async () => {
+    const tools = new UnifiedTools()
+    const publicNames = tools.getTools().map(tool => tool.name)
+
+    expect(publicNames).not.toContain('project_query')
+    expect(publicNames).not.toContain('project_asset_system')
+    await expect(tools.execute('tool_registry', { action: 'list' })).resolves.toMatchObject({
+      success: true,
+      data: {
+        tools: expect.not.arrayContaining([
+          expect.objectContaining({ name: 'project_query' }),
+          expect.objectContaining({ name: 'project_asset_system' }),
+        ]),
+      },
+    })
+    await expect(tools.execute('tool_registry', { action: 'actions' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      data: expect.not.arrayContaining([
+        expect.objectContaining({ name: 'project_query' }),
+        expect.objectContaining({ name: 'project_asset_system' }),
+      ]),
+    }))
+    await expect(tools.execute('tool_registry', { action: 'describe', toolName: 'project_query' })).resolves.toMatchObject({
+      success: true,
+      data: { name: 'project_query' },
+    })
+    await expect(tools.execute('project_query', { action: 'asset_url', uuid: 'missing-uuid' })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'TOOL_ASSET_ERROR',
+    })
+  })
+
+  it('resolves an asset identity from either URL or UUID through one action', async () => {
+    const request = vi.fn(async (_channel: string, method: string, value: string) => {
+      if (method === 'query-url')
+        return 'db://assets/player.png'
+      if (method === 'query-uuid')
+        return 'asset-uuid'
+      if (method === 'query-path')
+        return '/project/assets/player.png'
+      return null
+    })
+    vi.stubGlobal('Editor', { Message: { request } })
+    const tools = new UnifiedTools()
+
+    await expect(tools.execute('asset_query', {
+      action: 'resolve_identity',
+      urlOrUUID: 'asset-uuid',
+    })).resolves.toMatchObject({
+      success: true,
+      data: {
+        input: 'asset-uuid',
+        url: 'db://assets/player.png',
+        uuid: 'asset-uuid',
+        path: '/project/assets/player.png',
+      },
+    })
+    expect(request).toHaveBeenCalledWith('asset-db', 'query-url', 'asset-uuid')
+    expect(request).toHaveBeenCalledWith('asset-db', 'query-uuid', 'db://assets/player.png')
+    expect(request).toHaveBeenCalledWith('asset-db', 'query-path', 'db://assets/player.png')
+  })
+
+  it('routes public asset identifiers to the legacy asset database contract', async () => {
+    const request = vi.fn(async (_channel: string, method: string, value: string) => {
+      if (method === 'query-url')
+        return 'db://assets/player.png'
+      if (method === 'query-asset-info') {
+        return {
+          name: 'player.png',
+          uuid: 'asset-uuid',
+          url: value,
+          type: 'cc.Texture2D',
+          isDirectory: false,
+        }
+      }
+      if (method === 'query-uuid')
+        return 'asset-uuid'
+      return null
+    })
+    vi.stubGlobal('Editor', { Message: { request } })
+    const tools = new UnifiedTools()
+
+    await expect(tools.execute('asset_query', {
+      action: 'details',
+      urlOrUUID: 'asset-uuid',
+      includeSubAssets: false,
+    })).resolves.toMatchObject({
+      success: true,
+      data: { urlOrUUID: 'asset-uuid', assetUrl: 'db://assets/player.png' },
+    })
+    await expect(tools.execute('project_query', {
+      action: 'asset_details',
+      urlOrUUID: 'db://assets/player.png',
+      includeSubAssets: false,
+    })).resolves.toMatchObject({ success: true })
+    await expect(tools.execute('asset_query', {
+      action: 'query_uuid',
+      url: 'db://assets/player.png',
+    })).resolves.toMatchObject({ success: true, data: { uuid: 'asset-uuid' } })
+
+    expect(request).toHaveBeenCalledWith('asset-db', 'query-url', 'asset-uuid')
+    expect(request).toHaveBeenCalledWith('asset-db', 'query-asset-info', 'db://assets/player.png')
+    expect(request).toHaveBeenCalledWith('asset-db', 'query-uuid', 'db://assets/player.png')
+  })
+
+  it('accepts overwrite for imports and hides unavailable asset operations', async () => {
+    const tools = new UnifiedTools()
+    const assetManage = tools.getTools().find(tool => tool.name === 'asset_manage')
+    const assetAnalyze = tools.getTools().find(tool => tool.name === 'asset_analyze')
+    const assetBatch = tools.getTools().find(tool => tool.name === 'asset_batch')
+    const resourceReference = tools.getTools().find(tool => tool.name === 'resource_reference')
+    const preferences = tools.getTools().find(tool => tool.name === 'preferences_manage')
+
+    const importSchema = getActionSchema(assetManage!.inputSchema, 'import')
+    expect(importSchema).toMatchObject({
+      properties: { overwrite: { type: 'boolean' } },
+      required: ['action', 'sourcePath', 'targetFolder'],
+    })
+    await expect(tools.execute('asset_manage', {
+      action: 'import',
+      sourcePath: '/definitely/missing/player.png',
+      targetFolder: 'db://assets/textures',
+      overwrite: true,
+    })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'TOOL_ASSET_ERROR',
+      error: 'Source file not found',
+      metadata: {
+        category: 'asset',
+        attempted: {
+          action: 'import',
+          sourcePath: '/definitely/missing/player.png',
+          targetFolder: 'db://assets/textures',
+          overwrite: true,
+        },
+      },
+    })
+
+    expect(assetAnalyze?.inputSchema.properties?.action?.enum).toEqual(['validate_references'])
+    expect(assetBatch?.inputSchema.properties?.action?.enum).not.toContain('compress_textures')
+    expect(resourceReference?.inputSchema.properties?.action?.enum).not.toContain('asset_dependencies')
+    expect(preferences?.inputSchema.properties?.action?.enum).not.toContain('import')
   })
 
   it('describes action-specific undo requirements', () => {

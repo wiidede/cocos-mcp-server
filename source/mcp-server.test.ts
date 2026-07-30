@@ -10,14 +10,19 @@ const settings = {
   maxConnections: 10,
 }
 
-async function handle(message: unknown): Promise<unknown> {
+async function handle(message: unknown, era: 'legacy' | 'modern' = 'legacy'): Promise<unknown> {
   const server = new MCPServer(settings)
   const handler = server as unknown as {
-    handleMessage: (request: unknown) => Promise<unknown>
+    handleMessage: (request: unknown, era?: 'legacy' | 'modern') => Promise<unknown>
     setupTools: () => void
   }
   handler.setupTools()
-  return handler.handleMessage(message)
+  return handler.handleMessage(message, era)
+}
+
+const modernMeta = {
+  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+  'io.modelcontextprotocol/clientCapabilities': {},
 }
 
 describe('mcp protocol handler', () => {
@@ -53,6 +58,221 @@ describe('mcp protocol handler', () => {
       id: 2,
       result: { isError: true },
     })
+  })
+
+  it('discovers modern capabilities without an initialize handshake', async () => {
+    await expect(handle({
+      jsonrpc: '2.0',
+      id: 'discover-1',
+      method: 'server/discover',
+      params: { _meta: modernMeta },
+    }, 'modern')).resolves.toMatchObject({
+      id: 'discover-1',
+      result: {
+        resultType: 'complete',
+        supportedVersions: ['2026-07-28', '2024-11-05'],
+        capabilities: { tools: {} },
+        _meta: {
+          'io.modelcontextprotocol/serverInfo': {
+            name: 'cocos-mcp-server',
+            version: '2.0.0',
+          },
+        },
+      },
+    })
+  })
+
+  it('rejects unsupported modern versions with the protocol-defined error', async () => {
+    await expect(handle({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/list',
+      params: {
+        _meta: {
+          ...modernMeta,
+          'io.modelcontextprotocol/protocolVersion': '2099-01-01',
+        },
+      },
+    }, 'modern')).resolves.toMatchObject({
+      id: 3,
+      error: {
+        code: -32022,
+        data: {
+          requested: '2099-01-01',
+          supported: ['2026-07-28', '2024-11-05'],
+        },
+      },
+    })
+  })
+
+  it('requires modern request metadata on every request', async () => {
+    await expect(handle({
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/list',
+      params: {
+        _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' },
+      },
+    }, 'modern')).resolves.toMatchObject({
+      id: 4,
+      error: { code: -32602, message: expect.stringContaining('clientCapabilities') },
+    })
+  })
+
+  it('returns structured and text content for modern tool results', async () => {
+    await expect(handle({
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'tools/call',
+      params: {
+        _meta: modernMeta,
+        name: 'scene_management',
+        arguments: { action: 'not_supported' },
+      },
+    }, 'modern')).resolves.toMatchObject({
+      id: 5,
+      result: {
+        resultType: 'complete',
+        isError: true,
+        content: [{ type: 'text', text: expect.any(String) }],
+        structuredContent: {
+          success: false,
+          errorCode: 'TOOL_CONTRACT_ERROR',
+        },
+      },
+    })
+  })
+
+  it('validates modern HTTP routing headers and status codes', async () => {
+    const server = new MCPServer(settings)
+    await server.start()
+    const internal = server as unknown as { httpServer: { address: () => { port: number } } }
+    const port = internal.httpServer.address().port
+    const body = {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'server/discover',
+      params: { _meta: modernMeta },
+    }
+
+    try {
+      const valid = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'server/discover',
+        },
+        body: JSON.stringify(body),
+      })
+      expect(valid.status).toBe(200)
+      await expect(valid.json()).resolves.toMatchObject({ result: { resultType: 'complete' } })
+
+      const mismatch = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/list',
+        },
+        body: JSON.stringify(body),
+      })
+      expect(mismatch.status).toBe(400)
+      await expect(mismatch.json()).resolves.toMatchObject({ error: { code: -32020 } })
+
+      const unknown = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'unknown/method',
+        },
+        body: JSON.stringify({ ...body, id: 7, method: 'unknown/method' }),
+      })
+      expect(unknown.status).toBe(404)
+      await expect(unknown.json()).resolves.toMatchObject({ error: { code: -32601 } })
+
+      const unsupportedBody = {
+        ...body,
+        id: 8,
+        params: {
+          _meta: {
+            ...modernMeta,
+            'io.modelcontextprotocol/protocolVersion': '2099-01-01',
+          },
+        },
+      }
+      const unsupported = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'MCP-Protocol-Version': '2099-01-01',
+          'Mcp-Method': 'server/discover',
+        },
+        body: JSON.stringify(unsupportedBody),
+      })
+      expect(unsupported.status).toBe(400)
+      await expect(unsupported.json()).resolves.toMatchObject({
+        error: { code: -32022, data: { requested: '2099-01-01' } },
+      })
+
+      const missingName = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+        },
+        body: JSON.stringify({
+          ...body,
+          id: 9,
+          method: 'tools/call',
+          params: {
+            _meta: modernMeta,
+            name: 'scene_management',
+            arguments: { action: 'get_current' },
+          },
+        }),
+      })
+      expect(missingName.status).toBe(400)
+      await expect(missingName.json()).resolves.toMatchObject({ error: { code: -32020 } })
+    }
+    finally {
+      server.stop()
+    }
+  })
+
+  it('rejects disallowed HTTP origins before processing MCP messages', async () => {
+    const server = new MCPServer({ ...settings, allowedOrigins: ['http://allowed.example'] })
+    await server.start()
+    const internal = server as unknown as { httpServer: { address: () => { port: number } } }
+    const port = internal.httpServer.address().port
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Origin': 'http://blocked.example',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 10,
+          method: 'initialize',
+          params: { protocolVersion: '2024-11-05' },
+        }),
+      })
+      expect(response.status).toBe(403)
+      await expect(response.json()).resolves.toMatchObject({ error: { message: expect.stringContaining('Origin') } })
+    }
+    finally {
+      server.stop()
+    }
   })
 
   it('keeps disabled tools blocked for MCP calls but available to dev tests', async () => {

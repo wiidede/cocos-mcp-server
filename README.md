@@ -6,13 +6,16 @@
 
 本项目 Fork 自 [DaxianLee/cocos-mcp-server](https://github.com/DaxianLee/cocos-mcp-server)，持续修复并维护 MCP 工具与 Cocos 编辑器的集成。
 
-## 此 Fork 的改进
+## v2.0 主要特性
 
-- 使用统一工具注册表和 action-specific schema；每个 action 只公开其允许参数，减少 AI 猜测字段和试错。AI 可通过 `tools/list` 获取当前可调用契约，并在复杂调用前使用 `tool_registry.describe` 获取必填字段、示例和能力状态。
+- 同一 `/mcp` endpoint 同时支持 legacy MCP `2024-11-05` 和 modern MCP `2026-07-28`。modern transport 提供 `server/discover`、逐请求 `_meta`、HTTP routing header 校验、`resultType` 与 `structuredContent`，旧客户端仍可使用 `initialize`。
+- 使用统一工具注册表和 action-specific schema；每个 action 只公开允许参数。客户端可通过 `tools/list` 获取实时契约，通过 `tool_registry.describe` 查询必填字段、最小示例、deprecated 状态和能力状态。
+- 提供稳定的机器错误码，并在契约错误中返回 attempted/allowed 上下文，便于客户端自动修正参数，而不是依赖错误文本。
+- 收敛资源 API：推荐使用 `asset_query.resolve_identity` 一次解析 URL、UUID 和文件系统路径；旧转换 action 保持兼容但标记 deprecated。资源导入支持显式 `overwrite` 和安全冲突提示。
+- 隐藏重复的 legacy public wrapper 和当前不可用 action，直接调用兼容路径仍然保留，减少 `tools/list` 噪音和误调用。
 - `node_lifecycle.create` 支持创建节点时附加 `components`，以及 `initialTransform` 或顶层 `position` / `rotation` / `scale` 初始变换。
-- 补全并现代化项目、场景、节点、组件、预制体和资源管理能力。
-- 修复多项编辑器 IPC、组件属性和预制体操作的兼容性问题。
-- 提供 Dev Test Panel 与回归测试，防止已修复的编辑器集成问题再次出现。
+- 补全并现代化项目、场景、节点、组件、预制体和资源管理能力，并修复多项编辑器 IPC、组件属性和预制体操作兼容性问题。
+- 提供 Dev Test Panel、dispatcher 契约测试和双时代协议 fixture，防止工具与编辑器集成回归。
 
 ## 安装
 
@@ -46,6 +49,8 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp
 ```
 
 端口可在扩展面板中修改。
+
+服务端同时支持 legacy `2024-11-05` 和 modern `2026-07-28`：旧客户端继续使用 `initialize`；modern 客户端使用每请求 `_meta` 和对应的 `MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name` HTTP headers，并可先调用 `server/discover`。modern 工具结果同时返回 `structuredContent` 和兼容的 JSON 文本。
 
 ## 工具调用
 

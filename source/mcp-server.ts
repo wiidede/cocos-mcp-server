@@ -1,5 +1,7 @@
 import type { MCPClient, MCPServerSettings, ServerStatus, ToolConfig, ToolDefinition, ToolResponse } from './types'
+import { Buffer } from 'node:buffer'
 import * as http from 'node:http'
+import packageMetadata from '../package.json'
 import { UnifiedTools } from './tools/unified-tools'
 
 type JsonRpcId = string | number | null
@@ -8,6 +10,7 @@ type JsonRecord = Record<string, unknown>
 interface JsonRpcError {
   code: number
   message: string
+  data?: unknown
 }
 
 interface JsonRpcResponse {
@@ -21,7 +24,12 @@ interface InitializeParams extends JsonRecord {
   protocolVersion: string
 }
 
-const PROTOCOL_VERSION = '2024-11-05'
+const LEGACY_PROTOCOL_VERSION = '2024-11-05'
+const MODERN_PROTOCOL_VERSION = '2026-07-28'
+const SUPPORTED_PROTOCOL_VERSIONS = [MODERN_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION]
+const SERVER_INFO = { name: packageMetadata.name, version: packageMetadata.version } as const
+
+type ProtocolEra = 'legacy' | 'modern'
 
 interface SimplifiedToolDefinition {
   name: string
@@ -33,7 +41,11 @@ interface SimplifiedToolDefinition {
 }
 
 class JsonRpcRequestError extends Error {
-  constructor(public readonly code: number, message: string) {
+  constructor(
+    public readonly code: number,
+    message: string,
+    public readonly data?: unknown,
+  ) {
     super(message)
   }
 }
@@ -61,7 +73,7 @@ export class MCPServer {
 
   private initializeTools(): void {
     try {
-      console.log('[MCPServer] Initializing unified 1.5.0 tools...')
+      console.log(`[MCPServer] Initializing unified ${packageMetadata.version} tools...`)
       this.unifiedTools = new UnifiedTools({
         getSettings: () => this.settings,
         getToolDefinitions: () => this.toolsList,
@@ -168,10 +180,16 @@ export class MCPServer {
 
     // Set CORS headers
     const requestOrigin = req.headers.origin as string | undefined
+    if (!this.isOriginAllowed(requestOrigin)) {
+      res.setHeader('Content-Type', 'application/json')
+      res.writeHead(403)
+      res.end(JSON.stringify(this.createErrorResponse(null, -32600, 'Forbidden: Origin is not allowed')))
+      return
+    }
     const allowedOrigin = this.resolveCorsOrigin(requestOrigin)
     res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name')
     res.setHeader('Content-Type', 'application/json')
 
     if (req.method === 'OPTIONS') {
@@ -216,50 +234,68 @@ export class MCPServer {
 
     req.on('end', async () => {
       try {
-        const message = JSON.parse(body)
+        const message: unknown = JSON.parse(body)
+        const era = this.detectProtocolEra(message, req.headers)
+        if (era === 'modern') {
+          this.validateModernHttpRequest(message, req.headers)
+        }
 
-        const response = await this.handleMessage(message)
+        const response = await this.handleMessage(message, era)
         if (!response) {
           res.writeHead(202)
           res.end()
           return
         }
-        res.writeHead(200)
+        const status = era === 'modern' && response.error
+          ? this.getModernHttpErrorStatus(response.error.code)
+          : 200
+        res.writeHead(status)
         res.end(JSON.stringify(response))
       }
       catch (error: unknown) {
         console.error('Error handling MCP request:', error)
+        const requestError = error instanceof JsonRpcRequestError
+          ? error
+          : new JsonRpcRequestError(-32700, `Parse error: ${getErrorMessage(error)}`)
         res.writeHead(400)
-        res.end(JSON.stringify({
-          jsonrpc: '2.0',
-          id: null,
-          error: {
-            code: -32700,
-            message: `Parse error: ${getErrorMessage(error)}`,
-          },
-        }))
+        res.end(JSON.stringify(this.createErrorResponse(null, requestError.code, requestError.message, requestError.data)))
       }
     })
   }
 
-  private async handleMessage(message: unknown): Promise<JsonRpcResponse | null> {
-    if (!isRecord(message) || typeof message.method !== 'string') {
+  private async handleMessage(message: unknown, era: ProtocolEra = 'legacy'): Promise<JsonRpcResponse | null> {
+    if (!isRecord(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
       return this.createErrorResponse(null, -32600, 'Invalid Request')
     }
 
-    const id = typeof message.id === 'string' || typeof message.id === 'number' || message.id === null
-      ? message.id
-      : null
-    const { method, params } = message
-
-    if (method === 'notifications/initialized') {
+    if (!Object.hasOwn(message, 'id')) {
       return null
     }
+    const validId = typeof message.id === 'string' || typeof message.id === 'number'
+      || (era === 'legacy' && message.id === null)
+    if (!validId) {
+      return this.createErrorResponse(null, -32600, 'Invalid Request: request id must be a string or number')
+    }
+    const id = message.id as JsonRpcId
+    const { method, params } = message
 
     try {
-      let result: unknown
+      if (era === 'modern') {
+        this.validateModernRequestMetadata(params)
+      }
 
+      let result: unknown
       switch (method) {
+        case 'server/discover':
+          if (era !== 'modern') {
+            throw new JsonRpcRequestError(-32601, `Method not found: ${method}`)
+          }
+          result = {
+            supportedVersions: SUPPORTED_PROTOCOL_VERSIONS,
+            capabilities: { tools: {} },
+            instructions: 'Use tools/list to discover actions. Query exact UUIDs and asset identities before writes.',
+          }
+          break
         case 'tools/list':
           result = { tools: this.getAvailableTools() }
           break
@@ -269,26 +305,28 @@ export class MCPServer {
             throw new JsonRpcRequestError(-32602, 'Invalid params: tools/call requires a tool name')
           }
           const { name, arguments: args } = params
+          if (!this.toolsList.some(tool => tool.name === name)) {
+            throw new JsonRpcRequestError(-32602, `Unknown or disabled tool: ${name}`)
+          }
           const toolResult = await this.executeToolCall(name, args)
           result = {
             content: [{ type: 'text', text: JSON.stringify(toolResult) }],
+            ...(era === 'modern' ? { structuredContent: toolResult } : {}),
             isError: !toolResult.success,
           }
           break
         }
         case 'initialize':
+          if (era !== 'legacy') {
+            throw new JsonRpcRequestError(-32601, 'Method not found: initialize. This server supports modern MCP via per-request metadata and server/discover.')
+          }
           if (!this.isInitializeParams(params)) {
             throw new JsonRpcRequestError(-32602, 'Invalid params: initialize requires protocolVersion')
           }
           result = {
-            protocolVersion: this.negotiateProtocolVersion(params.protocolVersion),
-            capabilities: {
-              tools: {},
-            },
-            serverInfo: {
-              name: 'cocos-mcp-server',
-              version: '1.5.0',
-            },
+            protocolVersion: this.negotiateLegacyProtocolVersion(params.protocolVersion),
+            capabilities: { tools: {} },
+            serverInfo: SERVER_INFO,
           }
           break
         default:
@@ -298,30 +336,128 @@ export class MCPServer {
       return {
         jsonrpc: '2.0',
         id,
-        result,
+        result: era === 'modern' ? this.createModernResult(result) : result,
       }
     }
     catch (error: unknown) {
       if (error instanceof JsonRpcRequestError) {
-        return this.createErrorResponse(id, error.code, error.message)
+        return this.createErrorResponse(id, error.code, error.message, error.data)
       }
       return this.createErrorResponse(id, -32603, getErrorMessage(error))
     }
   }
 
-  private createErrorResponse(id: JsonRpcId, code: number, message: string): JsonRpcResponse {
-    return { jsonrpc: '2.0', id, error: { code, message } }
+  private createErrorResponse(id: JsonRpcId, code: number, message: string, data?: unknown): JsonRpcResponse {
+    return { jsonrpc: '2.0', id, error: { code, message, ...(data === undefined ? {} : { data }) } }
+  }
+
+  private createModernResult(result: unknown): JsonRecord {
+    return {
+      ...(isRecord(result) ? result : { value: result }),
+      resultType: 'complete',
+      _meta: { 'io.modelcontextprotocol/serverInfo': SERVER_INFO },
+    }
+  }
+
+  private validateModernRequestMetadata(params: unknown): void {
+    if (!isRecord(params) || !isRecord(params._meta)) {
+      throw new JsonRpcRequestError(-32602, 'Invalid params: modern requests require params._meta')
+    }
+    const metadata = params._meta
+    const requested = metadata['io.modelcontextprotocol/protocolVersion']
+    if (typeof requested !== 'string') {
+      throw new JsonRpcRequestError(-32602, 'Invalid params: _meta requires io.modelcontextprotocol/protocolVersion')
+    }
+    if (requested !== MODERN_PROTOCOL_VERSION) {
+      throw new JsonRpcRequestError(-32022, `Unsupported protocol version: ${requested}`, {
+        supported: SUPPORTED_PROTOCOL_VERSIONS,
+        requested,
+      })
+    }
+    if (!isRecord(metadata['io.modelcontextprotocol/clientCapabilities'])) {
+      throw new JsonRpcRequestError(-32602, 'Invalid params: _meta requires io.modelcontextprotocol/clientCapabilities')
+    }
   }
 
   private isInitializeParams(params: unknown): params is InitializeParams {
     return isRecord(params) && typeof params.protocolVersion === 'string'
   }
 
-  private negotiateProtocolVersion(clientVersion: string): string {
-    if (clientVersion !== PROTOCOL_VERSION) {
-      console.warn(`[MCPServer] Client requested protocol ${clientVersion}; using supported version ${PROTOCOL_VERSION}`)
+  private negotiateLegacyProtocolVersion(clientVersion: string): string {
+    if (clientVersion !== LEGACY_PROTOCOL_VERSION) {
+      console.warn(`[MCPServer] Client requested protocol ${clientVersion}; using supported legacy version ${LEGACY_PROTOCOL_VERSION}`)
     }
-    return PROTOCOL_VERSION
+    return LEGACY_PROTOCOL_VERSION
+  }
+
+  private detectProtocolEra(message: unknown, headers: http.IncomingHttpHeaders): ProtocolEra {
+    if (typeof headers['mcp-protocol-version'] === 'string') {
+      return 'modern'
+    }
+    if (isRecord(message) && isRecord(message.params) && isRecord(message.params._meta)
+      && typeof message.params._meta['io.modelcontextprotocol/protocolVersion'] === 'string') {
+      return 'modern'
+    }
+    return 'legacy'
+  }
+
+  private validateModernHttpRequest(message: unknown, headers: http.IncomingHttpHeaders): void {
+    if (!isRecord(message) || typeof message.method !== 'string') {
+      throw new JsonRpcRequestError(-32600, 'Invalid Request')
+    }
+    const params = isRecord(message.params) ? message.params : undefined
+    const metadata = params && isRecord(params._meta) ? params._meta : undefined
+    const bodyVersion = metadata?.['io.modelcontextprotocol/protocolVersion']
+    const protocolHeader = this.getHeader(headers, 'mcp-protocol-version')
+    const methodHeader = this.getHeader(headers, 'mcp-method')
+    const accept = this.getHeader(headers, 'accept') ?? ''
+
+    if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
+      throw new JsonRpcRequestError(-32020, 'HeaderMismatch: Accept must include application/json and text/event-stream')
+    }
+    if (!protocolHeader || protocolHeader !== bodyVersion) {
+      throw new JsonRpcRequestError(-32020, 'HeaderMismatch: MCP-Protocol-Version must match request _meta', {
+        header: protocolHeader ?? null,
+        body: bodyVersion ?? null,
+      })
+    }
+    if (!methodHeader || methodHeader !== message.method) {
+      throw new JsonRpcRequestError(-32020, 'HeaderMismatch: Mcp-Method must match request method', {
+        header: methodHeader ?? null,
+        body: message.method,
+      })
+    }
+    if (message.method === 'tools/call') {
+      const bodyName = params?.name
+      const nameHeader = this.getHeader(headers, 'mcp-name')
+      if (typeof bodyName !== 'string' || !nameHeader || this.decodeHeaderValue(nameHeader) !== bodyName) {
+        throw new JsonRpcRequestError(-32020, 'HeaderMismatch: Mcp-Name must match tools/call params.name', {
+          header: nameHeader ?? null,
+          body: bodyName ?? null,
+        })
+      }
+    }
+  }
+
+  private getHeader(headers: http.IncomingHttpHeaders, name: string): string | undefined {
+    const value = headers[name]
+    return Array.isArray(value) ? value[0] : value
+  }
+
+  private decodeHeaderValue(value: string): string {
+    if (value.startsWith('=?base64?') && value.endsWith('?=')) {
+      try {
+        return Buffer.from(value.slice(9, -2), 'base64').toString('utf8')
+      }
+      catch {
+        throw new JsonRpcRequestError(-32020, 'HeaderMismatch: malformed Base64 header value')
+      }
+    }
+    return value
+  }
+
+  private getModernHttpErrorStatus(code: number): number {
+    return code === -32601 ? 404 : 400
   }
 
   public stop(): void {
@@ -462,6 +598,14 @@ export class MCPServer {
       this.stop()
       this.start()
     }
+  }
+
+  private isOriginAllowed(requestOrigin?: string): boolean {
+    if (!requestOrigin) {
+      return true
+    }
+    const allowedOrigins = this.settings.allowedOrigins || ['*']
+    return allowedOrigins.includes('*') || allowedOrigins.includes(requestOrigin)
   }
 
   private resolveCorsOrigin(requestOrigin?: string): string {

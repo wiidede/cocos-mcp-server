@@ -22,7 +22,7 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 
 ## 调用原则
 
-- 先查询再修改：场景用 `scene_hierarchy`，节点用 `node_query`，组件用 `component_query`，资源用 `asset_query` 或 `project_query`。
+- 先查询再修改：场景用 `scene_hierarchy`，节点用 `node_query`，组件用 `component_query`，资源优先用 `asset_query`；`project_query` 是兼容旧调用的 wrapper。
 - 写操作使用 UUID、`nodeUuid`、`assetUuid` 和 `prefabPath`；名称仅适合搜索，且不保证唯一。
 - 不要猜 Cocos Editor message 名称；只调用 `tools/list` 暴露的工具和 action。
 - `scene_execution_control.execute_scene_script` 只能调用扩展已注册 scene script 的导出方法，不能执行临时 JavaScript；资源查询、日志读取和场景修改应使用对应的专用工具。
@@ -32,7 +32,7 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 - 删除组件前，先通过 `component_query.get_components` 获取组件实例 `uuid`、`componentType` 或 `cid`；删除无 cid 的 `cc.MissingScript` 时使用实例 `uuid`。
 - 预制体、资源引用和按钮事件操作前，先读取目标节点及组件状态。
 - `prefab_instance.instantiate` 和 `restore` 只有在 `query-nodes-by-asset-uuid` 回读确认关联后才算成功；`restore` 不用于将任意普通节点转换为 Prefab 实例。
-- 每次调用检查 `success`；失败时读取 `error` 和 `instruction`，重新查询状态后再重试。
+- 每次调用检查 `success`；失败时先按稳定的 `errorCode` 分类，再读取 `metadata.attempted`、`metadata.allowed`、`error` 和 `instruction`。契约错误使用 `TOOL_CONTRACT_ERROR`，目标、组件、资源、IPC 和运行时错误分别使用对应的 `TOOL_*_ERROR`。
 - 扩展重新构建或重载后应重新连接 MCP 客户端以刷新 `tools/list`；现有会话可能继续使用旧的工具 schema。
 
 ## 省 Token 规则
@@ -40,6 +40,7 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 - 先用 `tool_registry.actions` 或 `tool_registry.describe` 确认工具，而不是连续试错。
 - 查询结果只保留后续写操作需要的 UUID、componentType/cid、asset URL/UUID 和 property path。
 - 批量修改前先查询一次状态，再集中执行写操作；不要每改一个字段都重新全量查询。
+- `asset_query.resolve_identity` 是 URL/UUID 转换的首选入口，一次返回 `url`、`uuid` 和文件系统 `path`；`query_path`、`query_uuid`、`query_url` 仅为旧调用保留。
 - 优先使用精确 UUID/URL；只有不知道目标时才用名称、pattern 或 `get_all`。
 - 失败后优先按返回的 `instruction` 处理；没有指令时再查 `debug_console` 或 `debug_logs`。
 
@@ -84,7 +85,7 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 
 ### 查找资源引用节点
 
-1. `asset_query.query_uuid`、`asset_query.find_by_name` 或 `asset_query.details` 获取 `assetUuid`。
+1. `asset_query.resolve_identity`、`asset_query.find_by_name` 或 `asset_query.details` 获取 `assetUuid`。
 2. `resource_reference.nodes_by_asset_uuid` 或 `node_reference.nodes_by_asset_uuid` 查找场景节点。
 
 ### 诊断失败调用

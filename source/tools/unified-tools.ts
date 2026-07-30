@@ -1,4 +1,5 @@
 import type { JsonSchema, MCPServerSettings, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
+import packageMetadata from '../../package.json'
 import { requestScene } from '../editor-message'
 import { AssetAdvancedTools } from './asset-advanced-tools'
 import { BroadcastTools } from './broadcast-tools'
@@ -15,7 +16,7 @@ import { SceneAdvancedTools } from './scene-advanced-tools'
 import { SceneTools } from './scene-tools'
 import { SceneViewTools } from './scene-view-tools'
 import { ServerTools } from './server-tools'
-import { toolFailure } from './tool-response'
+import { errorCodeForCategory, toolFailure } from './tool-response'
 import { ValidationTools } from './validation-tools'
 
 interface ToolInfoProvider {
@@ -41,7 +42,7 @@ type RegisteredTool = ToolDefinition & {
   actionSpecs?: ActionSpec[]
 }
 
-type LegacyPrefix
+export type LegacyPrefix
   = | 'sceneAdvanced'
     | 'sceneView'
     | 'referenceImage'
@@ -56,6 +57,8 @@ type LegacyPrefix
     | 'preferences'
     | 'server'
     | 'broadcast'
+
+export type LegacyExecutorOverrides = Partial<Record<LegacyPrefix, ToolExecutor>>
 
 const LEGACY_PREFIXES: LegacyPrefix[] = [
   'sceneAdvanced',
@@ -73,6 +76,8 @@ const LEGACY_PREFIXES: LegacyPrefix[] = [
   'server',
   'broadcast',
 ]
+
+const LEGACY_PUBLIC_TOOL_NAMES = new Set(['project_asset_system', 'project_query'])
 
 const PROP = {
   string: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'string', description, ...extra }),
@@ -218,31 +223,38 @@ function pickProps(keys: string[]): Record<string, JsonSchema> {
 }
 
 export class UnifiedTools {
-  private readonly legacy: Record<LegacyPrefix, ToolExecutor> = {
-    scene: new SceneTools(),
-    node: new NodeTools(),
-    component: new ComponentTools(),
-    prefab: new PrefabTools(),
-    project: new ProjectTools(),
-    debug: new DebugTools(),
-    preferences: new PreferencesTools(),
-    server: new ServerTools(),
-    broadcast: new BroadcastTools(),
-    sceneAdvanced: new SceneAdvancedTools(),
-    sceneView: new SceneViewTools(),
-    referenceImage: new ReferenceImageTools(),
-    assetAdvanced: new AssetAdvancedTools(),
-    validation: new ValidationTools(),
-  }
+  private readonly legacy: Record<LegacyPrefix, ToolExecutor>
 
   private readonly tools: RegisteredTool[]
 
-  constructor(private readonly infoProvider: ToolInfoProvider = {}) {
+  constructor(
+    private readonly infoProvider: ToolInfoProvider = {},
+    legacyOverrides: LegacyExecutorOverrides = {},
+  ) {
+    this.legacy = {
+      scene: new SceneTools(),
+      node: new NodeTools(),
+      component: new ComponentTools(),
+      prefab: new PrefabTools(),
+      project: new ProjectTools(),
+      debug: new DebugTools(),
+      preferences: new PreferencesTools(),
+      server: new ServerTools(),
+      broadcast: new BroadcastTools(),
+      sceneAdvanced: new SceneAdvancedTools(),
+      sceneView: new SceneViewTools(),
+      referenceImage: new ReferenceImageTools(),
+      assetAdvanced: new AssetAdvancedTools(),
+      validation: new ValidationTools(),
+      ...legacyOverrides,
+    }
     this.tools = this.buildTools()
   }
 
   public getTools(): ToolDefinition[] {
-    return this.tools.map(({ execute, actionSpecs: _actionSpecs, ...tool }) => tool)
+    return this.tools
+      .filter(tool => !LEGACY_PUBLIC_TOOL_NAMES.has(tool.name))
+      .map(({ execute, actionSpecs: _actionSpecs, ...tool }) => tool)
   }
 
   public async execute(name: string, args: unknown): Promise<ToolResponse> {
@@ -252,6 +264,8 @@ export class UnifiedTools {
     }
     if (!this.isToolArguments(args)) {
       return toolFailure(`Tool ${name} requires an object argument`, {
+        data: { toolName: name, attempted: args, allowedProperties: ['action'] },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName: name }, allowed: ['action'] },
         instruction: 'Call tools/list or tool_registry.describe, then retry with a JSON object containing an action.',
       })
     }
@@ -748,7 +762,7 @@ export class UnifiedTools {
         }, args),
         {},
         [
-          { name: 'import', description: 'Import a filesystem asset into a project folder.', properties: ['sourcePath', 'targetFolder'], required: ['sourcePath', 'targetFolder'] },
+          { name: 'import', description: 'Import a filesystem asset into a project folder. Existing target files are replaced by default; set overwrite=false to reject collisions.', properties: ['sourcePath', 'targetFolder', 'overwrite'], required: ['sourcePath', 'targetFolder'], example: { action: 'import', sourcePath: '/absolute/path/to/Player.png', targetFolder: 'db://assets/textures', overwrite: true } },
           { name: 'create', description: 'Create an asset at an asset URL.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
           { name: 'copy', description: 'Copy an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
           { name: 'move', description: 'Move an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
@@ -761,10 +775,11 @@ export class UnifiedTools {
       ),
       this.createTool(
         'asset_query',
-        'Query asset database records, URLs, UUIDs, and paths. Use before asset writes and when converting between filesystem paths, asset URLs, and UUIDs. Actions: get_info, list, query_path, query_uuid, query_url, find_by_name, details, generate_available_url, db_ready.',
-        ['get_info', 'list', 'query_path', 'query_uuid', 'query_url', 'find_by_name', 'details', 'generate_available_url', 'db_ready'],
+        'Query asset identities and database records. Use resolve_identity before asset writes; it accepts either an asset URL or UUID and returns URL, UUID, and filesystem path. Actions: resolve_identity, get_info, list, query_path, query_uuid, query_url, find_by_name, details, generate_available_url, db_ready.',
+        ['resolve_identity', 'get_info', 'list', 'query_path', 'query_uuid', 'query_url', 'find_by_name', 'details', 'generate_available_url', 'db_ready'],
         ['assetPath', 'folder', 'type', 'url', 'uuid', 'name', 'exactMatch', 'assetType', 'maxResults', 'includeSubAssets'],
         args => this.routeLegacyAction('asset_query', {
+          resolve_identity: 'project_resolve_asset_identity',
           get_info: 'project_get_asset_info',
           list: 'project_get_assets',
           query_path: 'project_query_asset_path',
@@ -777,11 +792,12 @@ export class UnifiedTools {
         }, args),
         {},
         [
+          { name: 'resolve_identity', description: 'Resolve an asset URL or UUID to its canonical URL, UUID, and filesystem path.', properties: ['urlOrUUID'], required: ['urlOrUUID'], example: { action: 'resolve_identity', urlOrUUID: 'db://assets/prefabs/Player.prefab' } },
           { name: 'get_info', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'] },
           { name: 'list', description: 'List assets, optionally filtered by type or folder.', properties: ['type', 'folder'] },
-          { name: 'query_path', description: 'Convert an asset URL to a filesystem path.', properties: ['url'], required: ['url'] },
-          { name: 'query_uuid', description: 'Get an asset UUID from an asset path.', properties: ['assetPath'], required: ['assetPath'] },
-          { name: 'query_url', description: 'Get an asset URL from a UUID.', properties: ['uuid'], required: ['uuid'] },
+          { name: 'query_path', description: 'Deprecated: convert an asset URL to a filesystem path. Prefer resolve_identity.', properties: ['url'], required: ['url'], status: 'deprecated' },
+          { name: 'query_uuid', description: 'Deprecated: get an asset UUID from an asset URL. Prefer resolve_identity.', properties: ['url'], required: ['url'], status: 'deprecated' },
+          { name: 'query_url', description: 'Deprecated: get an asset URL from a UUID. Prefer resolve_identity.', properties: ['uuid'], required: ['uuid'], status: 'deprecated' },
           { name: 'find_by_name', description: 'Find assets by name.', properties: ['name', 'assetType', 'maxResults'], required: ['name'] },
           { name: 'details', description: 'Get detailed asset information by URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
           { name: 'generate_available_url', description: 'Generate an unused asset URL based on a requested URL.', properties: ['url'], required: ['url'], example: { action: 'generate_available_url', url: 'db://assets/NewScript.ts' } },
@@ -801,8 +817,8 @@ export class UnifiedTools {
         {},
         [
           { name: 'validate_references', description: 'Validate asset references, optionally under one directory.', properties: ['directory'] },
-          { name: 'dependencies', description: 'Get dependencies or dependents for an asset.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'], example: { action: 'dependencies', urlOrUUID: 'db://assets/prefabs/Player.prefab', direction: 'dependencies' } },
-          { name: 'unused', description: 'Find unused assets, optionally excluding directories.', properties: ['directory', 'excludeDirectories'] },
+          { name: 'dependencies', description: 'Get dependencies or dependents for an asset.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'], status: 'unsupported', unsupportedReason: 'Cocos Creator 3.8 does not expose the required dependency-analysis IPC. Use Creator’s asset dependency UI.' },
+          { name: 'unused', description: 'Find unused assets, optionally excluding directories.', properties: ['directory', 'excludeDirectories'], status: 'unsupported', unsupportedReason: 'Reliable unused-asset detection is not available through the current Cocos Creator 3.8 IPC. Use Creator’s asset tools or a project-specific analyzer.' },
         ],
       ),
       this.createTool(
@@ -820,7 +836,7 @@ export class UnifiedTools {
         [
           { name: 'batch_import', description: 'Import files from a filesystem directory.', properties: ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite'], required: ['sourceDirectory', 'targetDirectory'] },
           { name: 'batch_delete', description: 'Delete multiple asset URLs. This is destructive.', properties: ['urls'], required: ['urls'] },
-          { name: 'compress_textures', description: 'Compress textures in a directory.', properties: ['directory', 'format', 'quality'] },
+          { name: 'compress_textures', description: 'Compress textures in a directory.', properties: ['directory', 'format', 'quality'], status: 'unsupported', unsupportedReason: 'Texture compression is configured through Cocos Creator import/build settings; the current IPC does not expose a safe compression operation.' },
           { name: 'export_manifest', description: 'Export an asset manifest.', properties: ['directory', 'format', 'includeMetadata'] },
         ],
       ),
@@ -902,7 +918,7 @@ export class UnifiedTools {
         }, args),
         {},
         [
-          { name: 'import', description: 'Import a filesystem asset into a project folder.', properties: ['sourcePath', 'targetFolder'], required: ['sourcePath', 'targetFolder'] },
+          { name: 'import', description: 'Import a filesystem asset into a project folder. Existing target files are replaced by default; set overwrite=false to reject collisions.', properties: ['sourcePath', 'targetFolder', 'overwrite'], required: ['sourcePath', 'targetFolder'] },
           { name: 'create', description: 'Create an asset at an asset URL.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
           { name: 'copy', description: 'Copy an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
           { name: 'move', description: 'Move an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
@@ -931,7 +947,7 @@ export class UnifiedTools {
           { name: 'asset_info', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'], example: { action: 'asset_info', assetPath: 'db://assets/player.prefab' } },
           { name: 'asset_details', description: 'Get detailed asset information by asset URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
           { name: 'asset_path', description: 'Convert an asset URL to a filesystem path.', properties: ['url'], required: ['url'] },
-          { name: 'asset_uuid', description: 'Get an asset UUID from an asset path.', properties: ['assetPath'], required: ['assetPath'] },
+          { name: 'asset_uuid', description: 'Get an asset UUID from an asset URL.', properties: ['url'], required: ['url'] },
           { name: 'asset_url', description: 'Get an asset URL from a UUID.', properties: ['uuid'], required: ['uuid'] },
           { name: 'find_asset_by_name', description: 'Find assets by name.', properties: ['name', 'assetType', 'maxResults'], required: ['name'], example: { action: 'find_asset_by_name', name: 'player', assetType: 'cc.Prefab' } },
         ],
@@ -1033,7 +1049,7 @@ export class UnifiedTools {
           { name: 'get_all', description: 'Get all available preference categories.' },
           { name: 'reset', description: 'Reset a preference category or all preferences.', properties: ['name', 'type'] },
           { name: 'export', description: 'Export preferences to a file.', properties: ['exportPath'] },
-          { name: 'import', description: 'Import preferences from a file.', properties: ['importPath'], required: ['importPath'] },
+          { name: 'import', description: 'Import preferences from a file.', properties: ['importPath'], required: ['importPath'], status: 'unsupported', unsupportedReason: 'Cocos Creator 3.8 does not expose safe preference import through the current extension IPC. Import preferences manually in the Editor.' },
         ],
       ),
       this.createTool(
@@ -1169,7 +1185,7 @@ export class UnifiedTools {
         {},
         [
           { name: 'nodes_by_asset_uuid', description: 'Find scene nodes that reference an asset.', properties: ['assetUuid'], required: ['assetUuid'] },
-          { name: 'asset_dependencies', description: 'Get asset dependencies or dependents.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'] },
+          { name: 'asset_dependencies', description: 'Get asset dependencies or dependents.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'], status: 'unsupported', unsupportedReason: 'Cocos Creator 3.8 does not expose the required dependency-analysis IPC. Use Creator’s asset dependency UI.' },
           { name: 'validate_asset_references', description: 'Validate asset references, optionally under a directory.', properties: ['directory'] },
         ],
       ),
@@ -1259,45 +1275,49 @@ export class UnifiedTools {
       return undefined
     }
 
+    const supportedActions = specs.filter(spec => spec.status !== 'unsupported').map(spec => spec.name)
     const action = args.action
     if (typeof action !== 'string' || !action) {
       return toolFailure(`${toolName} requires an action parameter`, {
-        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName } },
-        instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${specs.filter(spec => spec.status !== 'unsupported').map(spec => spec.name).join(', ')}.`,
+        data: { toolName, attempted: args, allowedActions: supportedActions },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName }, attempted: args, allowed: ['action'] },
+        instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${supportedActions.join(', ')}.`,
       })
     }
 
     const spec = specs.find(item => item.name === action)
     if (!spec) {
       return toolFailure(`Unsupported action '${action}' for ${toolName}`, {
-        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName } },
-        instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${specs.filter(item => item.status !== 'unsupported').map(item => item.name).join(', ')}.`,
+        data: { toolName, action, attempted: args, allowedActions: supportedActions },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName }, attempted: args, allowed: ['action'] },
+        instruction: `Call tool_registry.describe with toolName="${toolName}", then retry with one of: ${supportedActions.join(', ')}.`,
       })
     }
 
+    const allowed = ['action', ...(spec.properties ?? [])]
     if (spec.status === 'unsupported') {
       return toolFailure(`Action '${action}' is unsupported for ${toolName}`, {
-        data: { toolName, action, status: spec.status, reason: spec.unsupportedReason },
-        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName } },
+        data: { toolName, action, status: spec.status, reason: spec.unsupportedReason, attempted: args, allowedProperties: allowed },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName }, attempted: args, allowed },
         instruction: spec.unsupportedReason || `Call tool_registry.describe with toolName="${toolName}" to choose a supported action.`,
       })
     }
 
-    const allowed = new Set(['action', ...(spec.properties ?? [])])
-    const unexpected = Object.keys(args).filter(key => !allowed.has(key))
+    const allowedSet = new Set(allowed)
+    const unexpected = Object.keys(args).filter(key => !allowedSet.has(key))
     if (unexpected.length > 0) {
       return toolFailure(`Action '${action}' for ${toolName} does not accept: ${unexpected.join(', ')}`, {
-        data: { toolName, action, allowedProperties: [...allowed] },
-        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action } },
-        instruction: `Remove ${unexpected.join(', ')}. Allowed fields: ${[...allowed].join(', ')}. Call tool_registry.describe with toolName="${toolName}" for the complete contract.`,
+        data: { toolName, action, attempted: args, allowedProperties: allowed },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action }, attempted: args, allowed },
+        instruction: `Remove ${unexpected.join(', ')}. Allowed fields: ${allowed.join(', ')}. Call tool_registry.describe with toolName="${toolName}" for the complete contract.`,
       })
     }
 
     const missing = (spec.required ?? []).filter(key => !Object.hasOwn(args, key))
     if (missing.length > 0) {
       return toolFailure(`Action '${action}' for ${toolName} requires: ${missing.join(', ')}`, {
-        data: { toolName, action, missing, required: spec.required },
-        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action } },
+        data: { toolName, action, attempted: args, allowedProperties: allowed, missing, required: spec.required },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action }, attempted: args, allowed },
         instruction: `Add ${missing.join(', ')} and retry. Call tool_registry.describe with toolName="${toolName}" for an example.`,
       })
     }
@@ -1305,8 +1325,8 @@ export class UnifiedTools {
     if (spec.requiredAnyOf && !spec.requiredAnyOf.some(group => group.every(key => Object.hasOwn(args, key)))) {
       const alternatives = spec.requiredAnyOf.map(group => group.join(' + ')).join(' or ')
       return toolFailure(`Action '${action}' for ${toolName} requires one of: ${alternatives}`, {
-        data: { toolName, action, requiredAnyOf: spec.requiredAnyOf },
-        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action } },
+        data: { toolName, action, attempted: args, allowedProperties: allowed, requiredAnyOf: spec.requiredAnyOf },
+        metadata: { category: 'contract', retryable: true, nextTool: 'tool_registry', nextAction: 'describe', retryWith: { toolName, action }, attempted: args, allowed },
         instruction: `Add ${alternatives} and retry. Call tool_registry.describe with toolName="${toolName}" for an example.`,
       })
     }
@@ -1347,15 +1367,18 @@ export class UnifiedTools {
       return result
     }
 
-    const instruction = result.instruction || this.getFailureInstruction(toolName, action, result.error || '', args)
-    if (!instruction) {
-      return result
-    }
-
+    const error = result.error || ''
+    const metadata = result.metadata ?? this.getFailureMetadata(toolName, action, error, args)
+    const errorCode = result.errorCode && result.errorCode !== 'TOOL_EXECUTION_ERROR'
+      ? result.errorCode
+      : errorCodeForCategory(metadata?.category)
     return {
       ...result,
-      instruction,
-      metadata: result.metadata ?? this.getFailureMetadata(toolName, action, result.error || '', args),
+      errorCode,
+      instruction: result.instruction || this.getFailureInstruction(toolName, action, error, args),
+      metadata: metadata
+        ? { ...metadata, attempted: metadata.attempted ?? { action, ...args } }
+        : undefined,
     }
   }
 
@@ -1458,7 +1481,7 @@ export class UnifiedTools {
           success: true,
           data: {
             status: 'ok',
-            version: '1.5.0',
+            version: packageMetadata.version,
             tools: this.getTools().length,
             settings: this.infoProvider.getSettings ? this.infoProvider.getSettings() : null,
           },
@@ -1490,13 +1513,14 @@ export class UnifiedTools {
 
   private async handleToolRegistry(args: ToolArguments): Promise<ToolResponse> {
     const tools = this.tools
+    const publicTools = tools.filter(tool => !LEGACY_PUBLIC_TOOL_NAMES.has(tool.name))
     switch (args.action) {
       case 'list':
         return {
           success: true,
           data: {
-            count: tools.length,
-            tools: tools.map(tool => ({
+            count: publicTools.length,
+            tools: publicTools.map(tool => ({
               name: tool.name,
               description: tool.description,
             })),
@@ -1533,7 +1557,7 @@ export class UnifiedTools {
       case 'actions':
         return {
           success: true,
-          data: tools.map(tool => ({
+          data: publicTools.map(tool => ({
             name: tool.name,
             actions: tool.actionSpecs?.map(spec => ({
               name: spec.name,

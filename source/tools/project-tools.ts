@@ -111,6 +111,11 @@ export class ProjectTools implements ToolExecutor {
               type: 'string',
               description: 'Target folder in assets',
             },
+            overwrite: {
+              type: 'boolean',
+              description: 'Replace an existing target asset; false rejects collisions',
+              default: true,
+            },
           },
           required: ['sourcePath', 'targetFolder'],
         },
@@ -312,6 +317,20 @@ export class ProjectTools implements ToolExecutor {
         },
       },
       {
+        name: 'resolve_asset_identity',
+        description: 'Resolve an asset URL or UUID to its URL, UUID, and filesystem path',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            urlOrUUID: {
+              type: 'string',
+              description: 'Asset URL or UUID',
+            },
+          },
+          required: ['urlOrUUID'],
+        },
+      },
+      {
         name: 'query_asset_path',
         description: 'Get asset disk path',
         inputSchema: {
@@ -396,9 +415,9 @@ export class ProjectTools implements ToolExecutor {
         inputSchema: {
           type: 'object',
           properties: {
-            assetPath: {
+            urlOrUUID: {
               type: 'string',
-              description: 'Asset path (db://assets/...)',
+              description: 'Asset URL or UUID',
             },
             includeSubAssets: {
               type: 'boolean',
@@ -406,7 +425,7 @@ export class ProjectTools implements ToolExecutor {
               default: true,
             },
           },
-          required: ['assetPath'],
+          required: ['urlOrUUID'],
         },
       },
     ]
@@ -438,8 +457,9 @@ export class ProjectTools implements ToolExecutor {
           : toolFailure('refresh_assets folder must be a string when provided')
       case 'import_asset':
         return typeof args.sourcePath === 'string' && typeof args.targetFolder === 'string'
-          ? this.importAsset(args.sourcePath, args.targetFolder)
-          : toolFailure('import_asset requires sourcePath and targetFolder strings')
+          && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
+          ? this.importAsset(args.sourcePath, args.targetFolder, args.overwrite)
+          : toolFailure('import_asset requires sourcePath, targetFolder, and an optional overwrite boolean')
       case 'get_asset_info':
         return typeof args.assetPath === 'string' ? this.getAssetInfo(args.assetPath) : toolFailure('get_asset_info requires assetPath')
       case 'get_assets':
@@ -479,6 +499,10 @@ export class ProjectTools implements ToolExecutor {
           : toolFailure('save_asset requires url and content strings')
       case 'reimport_asset':
         return typeof args.url === 'string' ? this.reimportAsset(args.url) : toolFailure('reimport_asset requires url')
+      case 'resolve_asset_identity':
+        return typeof args.urlOrUUID === 'string'
+          ? this.resolveAssetIdentity(args.urlOrUUID)
+          : toolFailure('resolve_asset_identity requires urlOrUUID')
       case 'query_asset_path':
         return typeof args.url === 'string' ? this.queryAssetPath(args.url) : toolFailure('query_asset_path requires url')
       case 'query_asset_uuid':
@@ -494,9 +518,9 @@ export class ProjectTools implements ToolExecutor {
           ? this.findAssetByName({ ...args, name: args.name, exactMatch: args.exactMatch, assetType: args.assetType, folder: args.folder, maxResults: args.maxResults })
           : toolFailure('find_asset_by_name requires name and optional matching filters')
       case 'get_asset_details':
-        return typeof args.assetPath === 'string' && (args.includeSubAssets === undefined || typeof args.includeSubAssets === 'boolean')
-          ? this.getAssetDetails(args.assetPath, args.includeSubAssets)
-          : toolFailure('get_asset_details requires assetPath and optional includeSubAssets')
+        return typeof args.urlOrUUID === 'string' && (args.includeSubAssets === undefined || typeof args.includeSubAssets === 'boolean')
+          ? this.getAssetDetails(args.urlOrUUID, args.includeSubAssets)
+          : toolFailure('get_asset_details requires urlOrUUID and optional includeSubAssets')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -614,8 +638,8 @@ export class ProjectTools implements ToolExecutor {
     })
   }
 
-  private async importAsset(sourcePath: string, targetFolder: string): Promise<ToolResponse> {
-    return new Promise((resolve) => {
+  private async importAsset(sourcePath: string, targetFolder: string, overwrite: boolean = true): Promise<ToolResponse> {
+    return new Promise(async (resolve) => {
       if (!fs.existsSync(sourcePath)) {
         resolve({ success: false, error: 'Source file not found' })
         return
@@ -625,8 +649,25 @@ export class ProjectTools implements ToolExecutor {
       const targetPath = targetFolder.startsWith('db://')
         ? targetFolder
         : `db://assets/${targetFolder}`
+      const targetUrl = `${targetPath}/${fileName}`
 
-      Editor.Message.request('asset-db', 'import-asset', sourcePath, `${targetPath}/${fileName}`).then((result) => {
+      if (!overwrite) {
+        try {
+          const existing = await Editor.Message.request('asset-db', 'query-asset-info', targetUrl)
+          if (existing) {
+            resolve(toolFailure(`Target asset already exists: ${targetUrl}`, {
+              instruction: 'Retry with overwrite=true to replace the existing asset, or call asset_query.generate_available_url and choose another target.',
+              metadata: { category: 'asset', retryable: true, nextTool: 'asset_query', nextAction: 'generate_available_url', retryWith: { url: targetUrl } },
+            }))
+            return
+          }
+        }
+        catch {
+          // A missing asset may be reported as either null or a rejected query.
+        }
+      }
+
+      Editor.Message.request('asset-db', 'import-asset', sourcePath, targetUrl).then((result) => {
         if (!result) {
           resolve({ success: false, error: 'Asset import returned no result' })
           return
@@ -965,6 +1006,44 @@ export class ProjectTools implements ToolExecutor {
     })
   }
 
+  private async resolveAssetIdentity(urlOrUUID: string): Promise<ToolResponse> {
+    try {
+      const url = urlOrUUID.startsWith('db://')
+        ? urlOrUUID
+        : await Editor.Message.request('asset-db', 'query-url', urlOrUUID)
+      if (!url) {
+        return toolFailure(`Asset URL not found for: ${urlOrUUID}`, {
+          metadata: { category: 'asset', retryable: true, attempted: { urlOrUUID } },
+        })
+      }
+
+      const [uuid, assetPath] = await Promise.all([
+        Editor.Message.request('asset-db', 'query-uuid', url),
+        Editor.Message.request('asset-db', 'query-path', url),
+      ])
+      if (!uuid) {
+        return toolFailure(`Asset UUID not found for: ${url}`, {
+          metadata: { category: 'asset', retryable: true, attempted: { urlOrUUID, url } },
+        })
+      }
+
+      return {
+        success: true,
+        data: {
+          input: urlOrUUID,
+          url,
+          uuid,
+          path: assetPath ?? null,
+        },
+      }
+    }
+    catch (error: unknown) {
+      return toolFailure(`Failed to resolve asset identity: ${error instanceof Error ? error.message : String(error)}`, {
+        metadata: { category: 'ipc', retryable: true, attempted: { urlOrUUID } },
+      })
+    }
+  }
+
   private async queryAssetPath(url: string): Promise<ToolResponse> {
     return new Promise((resolve) => {
       Editor.Message.request('asset-db', 'query-path', url).then((path: string | null) => {
@@ -1093,11 +1172,19 @@ export class ProjectTools implements ToolExecutor {
     })
   }
 
-  private async getAssetDetails(assetPath: string, includeSubAssets: boolean = true): Promise<ToolResponse> {
+  private async getAssetDetails(urlOrUUID: string, includeSubAssets: boolean = true): Promise<ToolResponse> {
     return new Promise(async (resolve) => {
       try {
+        const assetUrl = urlOrUUID.startsWith('db://')
+          ? urlOrUUID
+          : await Editor.Message.request('asset-db', 'query-url', urlOrUUID)
+        if (!assetUrl) {
+          resolve(toolFailure(`Asset URL not found for: ${urlOrUUID}`))
+          return
+        }
+
         // Get basic asset info
-        const assetInfoResponse = await this.getAssetInfo(assetPath)
+        const assetInfoResponse = await this.getAssetInfo(assetUrl)
         if (!assetInfoResponse.success) {
           resolve(assetInfoResponse)
           return
@@ -1112,7 +1199,7 @@ export class ProjectTools implements ToolExecutor {
 
         if (includeSubAssets && assetInfo) {
           // For image assets, try to get spriteFrame and texture sub-assets
-          if (assetInfo.type === 'cc.ImageAsset' || /\.(?:png|jpg|jpeg|gif|tga|bmp|psd)$/i.test(assetPath)) {
+          if (assetInfo.type === 'cc.ImageAsset' || /\.(?:png|jpg|jpeg|gif|tga|bmp|psd)$/i.test(assetUrl)) {
             // Generate common sub-asset UUIDs
             const baseUuid = assetInfo.uuid
             const possibleSubAssets = [
@@ -1144,7 +1231,8 @@ export class ProjectTools implements ToolExecutor {
         resolve({
           success: true,
           data: {
-            assetPath,
+            urlOrUUID,
+            assetUrl,
             includeSubAssets,
             ...detailedInfo,
             message: `Asset details retrieved. Found ${subAssets.length} sub-assets.`,
