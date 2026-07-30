@@ -336,7 +336,7 @@ export class MCPServer {
       return {
         jsonrpc: '2.0',
         id,
-        result: era === 'modern' ? this.createModernResult(result) : result,
+        result: era === 'modern' ? this.createModernResult(method, result) : result,
       }
     }
     catch (error: unknown) {
@@ -351,10 +351,15 @@ export class MCPServer {
     return { jsonrpc: '2.0', id, error: { code, message, ...(data === undefined ? {} : { data }) } }
   }
 
-  private createModernResult(result: unknown): JsonRecord {
+  private createModernResult(method: string, result: unknown): JsonRecord {
+    const cacheHints = method === 'server/discover' || method === 'tools/list'
+      ? { ttlMs: 0, cacheScope: 'public' as const }
+      : {}
+
     return {
       ...(isRecord(result) ? result : { value: result }),
       resultType: 'complete',
+      ...cacheHints,
       _meta: { 'io.modelcontextprotocol/serverInfo': SERVER_INFO },
     }
   }

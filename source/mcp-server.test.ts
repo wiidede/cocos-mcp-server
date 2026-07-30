@@ -70,6 +70,8 @@ describe('mcp protocol handler', () => {
       id: 'discover-1',
       result: {
         resultType: 'complete',
+        ttlMs: 0,
+        cacheScope: 'public',
         supportedVersions: ['2026-07-28', '2024-11-05'],
         capabilities: { tools: {} },
         _meta: {
@@ -78,6 +80,23 @@ describe('mcp protocol handler', () => {
             version: '2.0.0',
           },
         },
+      },
+    })
+  })
+
+  it('returns cache hints for the modern tools list', async () => {
+    await expect(handle({
+      jsonrpc: '2.0',
+      id: 'tools-list-1',
+      method: 'tools/list',
+      params: { _meta: modernMeta },
+    }, 'modern')).resolves.toMatchObject({
+      id: 'tools-list-1',
+      result: {
+        resultType: 'complete',
+        ttlMs: 0,
+        cacheScope: 'public',
+        tools: expect.any(Array),
       },
     })
   })
@@ -141,6 +160,22 @@ describe('mcp protocol handler', () => {
         },
       },
     })
+  })
+
+  it('does not add cache hints to modern tool call results', async () => {
+    const response = await handle({
+      jsonrpc: '2.0',
+      id: 'tool-call-cache-1',
+      method: 'tools/call',
+      params: {
+        _meta: modernMeta,
+        name: 'scene_management',
+        arguments: { action: 'not_supported' },
+      },
+    }, 'modern') as { result: Record<string, unknown> }
+
+    expect(response.result).not.toHaveProperty('ttlMs')
+    expect(response.result).not.toHaveProperty('cacheScope')
   })
 
   it('validates modern HTTP routing headers and status codes', async () => {
