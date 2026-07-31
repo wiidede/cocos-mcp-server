@@ -292,7 +292,7 @@ export class DebugTools implements ToolExecutor {
 
   private executeScript(script: string): ToolResponse {
     return toolFailure('Arbitrary JavaScript execution is not supported by Cocos Creator scene scripts.', {
-      instruction: 'Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or scene_execution_control.execute_scene_script for a method already exported by a registered scene script.',
+      instruction: 'Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or scene_execution.execute_scene_script for a method already exported by a registered scene script.',
       data: { rejectedScriptLength: script.length },
     })
   }

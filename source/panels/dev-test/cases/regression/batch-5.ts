@@ -66,7 +66,7 @@ export const batch5Tests: TestCase[] = [
       const uuid = created?.data?.uuid ?? created?.uuid
       ctx.assert(typeof uuid === 'string', created?.error ?? 'create returned no uuid')
       const write: any = await ctx.callTool('node_transform', {
-        action: 'set_transform',
+        action: 'set',
         uuid,
         position: { x: 4.3, y: 0, z: -5 },
         rotation: { x: 0, y: -16, z: 0 },
@@ -109,7 +109,7 @@ export const batch5Tests: TestCase[] = [
       const uuid = created?.data?.uuid ?? created?.uuid
       ctx.assert(typeof uuid === 'string', created?.error ?? 'create returned no uuid')
       const write: any = await ctx.callTool('component_property', {
-        action: 'set_property',
+        action: 'set',
         nodeUuid: uuid,
         componentType: 'cc.MeshRenderer',
         property: 'materials',
@@ -139,11 +139,11 @@ export const batch5Tests: TestCase[] = [
       })
       const uuid = created?.data?.uuid ?? created?.uuid
       ctx.assert(typeof uuid === 'string', created?.error ?? 'create returned no uuid')
-      const added: any = await ctx.callTool('component_manage', { action: 'add', nodeUuid: uuid, componentType: 'cc.BoxCollider' })
+      const added: any = await ctx.callTool('component_lifecycle', { action: 'add', nodeUuid: uuid, componentType: 'cc.BoxCollider' })
       ctx.assert(added?.success === true, added?.error ?? 'could not add BoxCollider')
       await sleep(150)
       const write: any = await ctx.callTool('component_property', {
-        action: 'set_property',
+        action: 'set',
         nodeUuid: uuid,
         componentType: 'cc.BoxCollider',
         property: 'size',
@@ -155,7 +155,7 @@ export const batch5Tests: TestCase[] = [
       const collider = (node?.__comps__ ?? []).find((component: any) => isComponentType(component, 'cc.BoxCollider'))
       const directSize = propertyValue(collider?.value?.size ?? collider?.size)
       const inspected: any = await ctx.callTool('component_query', {
-        action: 'get_info',
+        action: 'get',
         nodeUuid: uuid,
         componentType: 'cc.BoxCollider',
       })

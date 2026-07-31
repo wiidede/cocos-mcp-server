@@ -50,7 +50,7 @@ source/panels/dev-test/
 | bug_03 | scene_query.get_info 返回信息        | core/scene.ts       | `scene.query.get_info_returns_data`              |
 | bug_04 | node_query components 字段完整       | core/node.ts        | `node.query.components_include_type_uuid`        |
 | bug_05 | component_property.set 支持多种类型  | core/component.ts   | `component.property.set_supports_all_types`      |
-| bug_06 | node_transform.set_property 数值转换 | core/node.ts        | `node.transform.numeric_value_conversion`        |
+| bug_06 | node_property.set 数值转换           | core/node.ts        | `node.transform.numeric_value_conversion`        |
 | bug_07 | prefab_create 内部引用格式           | regression/index.ts | `regression.prefab_internal_reference_format`    |
 | bug_08 | asset_query.find_by_name 返回结果    | core/asset.ts       | `asset.query.find_by_name_returns_matches`       |
 | bug_09 | component_remove cid vs class name   | regression/index.ts | `regression.component_remove_requires_cid`       |
@@ -109,11 +109,11 @@ export const sceneTests: TestCase[] = [
   {
     name: 'scene.create.with_name_and_path',
     group: 'core/scene',
-    description: 'scene_management.create accepts both sceneName and savePath parameters',
+    description: 'scene_lifecycle.create accepts both sceneName and savePath parameters',
     tags: ['core', 'scene', 'critical'],
     timeout: 5000,
     run: async (ctx) => {
-      const resp = await ctx.callTool('scene_management', {
+      const resp = await ctx.callTool('scene_lifecycle', {
         action: 'create',
         sceneName: 'TestScene',
         savePath: 'db://assets/__test__/TestScene.scene',

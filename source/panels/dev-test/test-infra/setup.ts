@@ -64,7 +64,7 @@ export async function createTestSession(): Promise<TestSession> {
       sceneOpen = true
       return
     }
-    const createResp = await callTool('scene_management', {
+    const createResp = await callTool('scene_lifecycle', {
       action: 'create',
       savePath: TEST_SCENE_PATH,
       autoCreateCanvas: false,
@@ -140,7 +140,7 @@ export async function createTestSession(): Promise<TestSession> {
     currentAssetPath = null
 
     for (const url of trackedAssetUrls) {
-      await callTool('asset_manage', { action: 'delete', url }).catch(() => undefined)
+      await callTool('asset_lifecycle', { action: 'delete', url }).catch(() => undefined)
     }
 
     const sceneUuid = await getAssetUuidByPath(TEST_SCENE_PATH)

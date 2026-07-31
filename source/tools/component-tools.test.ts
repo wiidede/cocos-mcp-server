@@ -54,8 +54,8 @@ describe('component tools', () => {
       error: expect.stringContaining('is not available in the Cocos asset database'),
       metadata: {
         category: 'asset',
-        nextTool: 'project_manage',
-        nextAction: 'refresh_assets',
+        nextTool: 'asset_lifecycle',
+        nextAction: 'refresh',
       },
     })
     expect(request).not.toHaveBeenCalledWith('scene', 'create-component', expect.anything())
@@ -80,7 +80,7 @@ describe('component tools', () => {
       metadata: {
         category: 'component',
         nextTool: 'component_query',
-        nextAction: 'get_components',
+        nextAction: 'list',
       },
       instruction: expect.stringContaining('component instance uuid'),
     })

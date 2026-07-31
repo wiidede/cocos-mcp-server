@@ -7,4 +7,17 @@ describe('scene hierarchy builder', () => {
     expect(buildSceneHierarchy(tree, true)).toMatchObject({ uuid: 'root', children: [{ uuid: 'child', components: [{ type: 'cc.Sprite', enabled: false }] }] })
     expect(buildSceneHierarchy(tree, false).children[0].components).toBeUndefined()
   })
+
+  it('limits hierarchy depth while preserving child counts', () => {
+    const tree = {
+      uuid: 'root',
+      children: [{ uuid: 'child', children: [{ uuid: 'grandchild' }] }],
+    }
+
+    expect(buildSceneHierarchy(tree, false, 1)).toMatchObject({
+      uuid: 'root',
+      childCount: 1,
+      children: [{ uuid: 'child', childCount: 1, truncated: true, children: [] }],
+    })
+  })
 })

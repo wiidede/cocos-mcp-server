@@ -32,7 +32,7 @@ async function createEmptyNode(ctx: TestContext, name: string, parentUuid = ''):
 /** 给节点加组件，返回是否成功 */
 async function addComponentSafely(ctx: TestContext, nodeUuid: string, componentType: string): Promise<boolean> {
   try {
-    const resp: any = await ctx.callTool('component_manage', { action: 'add', nodeUuid, componentType })
+    const resp: any = await ctx.callTool('component_lifecycle', { action: 'add', nodeUuid, componentType })
     if (resp?.success === false) {
       ctx.step(`add ${componentType}`, false, resp?.error?.slice(0, 120) ?? 'failed')
       return false

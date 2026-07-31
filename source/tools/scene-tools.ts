@@ -1,3 +1,4 @@
+import type { SceneNodeDump } from '../editor-message'
 import type { SceneInfo, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 import { requestAssetDb, requestEditor, requestScene } from '../editor-message'
 import { buildSceneHierarchy } from './scene-hierarchy'
@@ -109,6 +110,14 @@ export class SceneTools implements ToolExecutor {
               description: 'Include component information',
               default: false,
             },
+            rootUuid: {
+              type: 'string',
+              description: 'Optional subtree root node UUID',
+            },
+            maxDepth: {
+              type: 'number',
+              description: 'Optional maximum depth relative to the selected root',
+            },
           },
         },
       },
@@ -145,9 +154,11 @@ export class SceneTools implements ToolExecutor {
       case 'close_scene':
         return this.closeScene()
       case 'get_scene_hierarchy':
-        return args.includeComponents === undefined || typeof args.includeComponents === 'boolean'
-          ? this.getSceneHierarchy(args.includeComponents)
-          : toolFailure('get_scene_hierarchy includeComponents must be a boolean when provided')
+        return (args.includeComponents === undefined || typeof args.includeComponents === 'boolean')
+          && (args.rootUuid === undefined || typeof args.rootUuid === 'string')
+          && (args.maxDepth === undefined || typeof args.maxDepth === 'number')
+          ? this.getSceneHierarchy(args.includeComponents, args.rootUuid, args.maxDepth)
+          : toolFailure('get_scene_hierarchy accepts optional includeComponents boolean, rootUuid string, and maxDepth number')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -525,35 +536,39 @@ export class SceneTools implements ToolExecutor {
     }
   }
 
-  private async getSceneHierarchy(includeComponents: boolean = false): Promise<ToolResponse> {
-    return new Promise((resolve) => {
-      // 优先尝试使用 Editor API 查询场景节点树
-      requestScene('query-node-tree').then((tree) => {
-        if (tree) {
-          const hierarchy = buildSceneHierarchy(tree, includeComponents)
-          resolve({
-            success: true,
-            data: hierarchy,
-          })
-        }
-        else {
-          resolve({ success: false, error: 'No scene hierarchy available' })
-        }
-      }).catch((err: Error) => {
-        // 备用方案：使用场景脚本
-        const options = {
-          name: 'cocos-mcp-server',
-          method: 'getSceneHierarchy',
-          args: [includeComponents],
-        }
+  private async getSceneHierarchy(includeComponents: boolean = false, rootUuid?: string, maxDepth?: number): Promise<ToolResponse> {
+    try {
+      const tree = await requestScene('query-node-tree')
+      if (!tree) {
+        return { success: false, error: 'No scene hierarchy available' }
+      }
 
-        Editor.Message.request('scene', 'execute-scene-script', options).then((result) => {
-          resolve(result)
-        }).catch((err2: Error) => {
-          resolve({ success: false, error: `Direct API failed: ${err.message}, Scene script failed: ${err2.message}` })
-        })
-      })
-    })
+      const root = rootUuid ? this.findSceneNode(tree, rootUuid) : tree
+      if (!root) {
+        return { success: false, error: `Node with UUID ${rootUuid} not found` }
+      }
+
+      return {
+        success: true,
+        data: buildSceneHierarchy(root, includeComponents, maxDepth),
+      }
+    }
+    catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  private findSceneNode(node: SceneNodeDump, uuid: string): SceneNodeDump | undefined {
+    if (node.uuid === uuid) {
+      return node
+    }
+    for (const child of node.children ?? []) {
+      const match = this.findSceneNode(child, uuid)
+      if (match) {
+        return match
+      }
+    }
+    return undefined
   }
 
   private async saveSceneAs(path: string): Promise<ToolResponse> {

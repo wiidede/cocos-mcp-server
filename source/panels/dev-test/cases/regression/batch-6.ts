@@ -29,7 +29,7 @@ export const batch6Tests: TestCase[] = [
       ctx.trackNode(nodeUuid)
 
       try {
-        const added: any = await ctx.callTool('component_manage', {
+        const added: any = await ctx.callTool('component_lifecycle', {
           action: 'add',
           nodeUuid,
           componentType: 'cc.Label',
@@ -37,7 +37,7 @@ export const batch6Tests: TestCase[] = [
         ctx.assert(added?.success === true, added?.error ?? 'cc.Label was not added')
 
         const queried: any = await ctx.callTool('component_query', {
-          action: 'get_components',
+          action: 'list',
           nodeUuid,
         })
         const components = queried?.data?.components ?? queried?.components ?? []
@@ -45,7 +45,7 @@ export const batch6Tests: TestCase[] = [
         ctx.assert(label, `cc.Label was not found: ${JSON.stringify(components)}`)
         ctx.assert(typeof label.uuid === 'string' && label.uuid.length > 0, `component uuid missing: ${JSON.stringify(label)}`)
 
-        const wrongRemoval: any = await ctx.callTool('component_manage', {
+        const wrongRemoval: any = await ctx.callTool('component_lifecycle', {
           action: 'remove',
           nodeUuid,
           componentType: 'stale-component-identity',
@@ -57,7 +57,7 @@ export const batch6Tests: TestCase[] = [
           `available component uuid missing: ${JSON.stringify(wrongRemoval)}`,
         )
 
-        const removed: any = await ctx.callTool('component_manage', {
+        const removed: any = await ctx.callTool('component_lifecycle', {
           action: 'remove',
           nodeUuid,
           componentType: label.uuid,
@@ -98,11 +98,11 @@ export const batch6Tests: TestCase[] = [
         })
         ctx.assert(response?.success === false, 'missing script asset should not attach')
         ctx.assert(response?.metadata?.category === 'asset', JSON.stringify(response))
-        ctx.assert(response?.metadata?.nextTool === 'project_manage', JSON.stringify(response))
-        ctx.assert(response?.metadata?.nextAction === 'refresh_assets', JSON.stringify(response))
+        ctx.assert(response?.metadata?.nextTool === 'asset_lifecycle', JSON.stringify(response))
+        ctx.assert(response?.metadata?.nextAction === 'refresh', JSON.stringify(response))
 
         const components: any = await ctx.callTool('component_query', {
-          action: 'get_components',
+          action: 'list',
           nodeUuid,
         })
         const list = components?.data?.components ?? components?.components ?? []

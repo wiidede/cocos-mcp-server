@@ -77,8 +77,6 @@ const LEGACY_PREFIXES: LegacyPrefix[] = [
   'broadcast',
 ]
 
-const LEGACY_PUBLIC_TOOL_NAMES = new Set(['project_asset_system', 'project_query'])
-
 const PROP = {
   string: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'string', description, ...extra }),
   number: (description: string, extra: Record<string, unknown> = {}): JsonSchema => ({ type: 'number', description, ...extra }),
@@ -94,7 +92,7 @@ const PROP = {
 
 const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   uuid: PROP.string('UUID'),
-  undoId: PROP.string('Undo recording ID returned by scene_undo_manage.begin'),
+  undoId: PROP.string('Undo recording ID returned by scene_undo.begin'),
   uuids: {
     oneOf: [
       { type: 'string' },
@@ -252,9 +250,7 @@ export class UnifiedTools {
   }
 
   public getTools(): ToolDefinition[] {
-    return this.tools
-      .filter(tool => !LEGACY_PUBLIC_TOOL_NAMES.has(tool.name))
-      .map(({ execute, actionSpecs: _actionSpecs, ...tool }) => tool)
+    return this.tools.map(({ execute, actionSpecs: _actionSpecs, ...tool }) => tool)
   }
 
   public async execute(name: string, args: unknown): Promise<ToolResponse> {
@@ -276,11 +272,11 @@ export class UnifiedTools {
   private buildTools(): RegisteredTool[] {
     return [
       this.createTool(
-        'scene_management',
-        'Manage scene files and lifecycle. Query current scene before writes; save after structural changes when persistence is required. `open` requires `scenePath` (for example `db://assets/scenes/Main.scene`); `path` is not accepted by this action. Opening the already-current scene is a Cocos no-op and does not reload externally edited files—use scene_execution_control.soft_reload instead. Actions: get_current, list, open, save, create, save_as, close.',
-        ['get_current', 'list', 'open', 'save', 'create', 'save_as', 'close'],
+        'scene_lifecycle',
+        'Manage scene files and lifecycle. Query current scene before writes; save after structural changes when persistence is required. `open` requires `scenePath` (for example `db://assets/scenes/Main.scene`); `path` is not accepted by this action. Opening the already-current scene is a Cocos no-op and does not reload externally edited files; use soft_reload instead. Actions: get_current, list, open, save, create, save_as, close, soft_reload.',
+        ['get_current', 'list', 'open', 'save', 'create', 'save_as', 'close', 'soft_reload'],
         ['scenePath', 'sceneName', 'savePath', 'autoCreateCanvas'],
-        args => this.routeLegacyAction('scene_management', {
+        args => this.routeLegacyAction('scene_lifecycle', {
           get_current: 'scene_get_current_scene',
           list: 'scene_get_scene_list',
           open: 'scene_open_scene',
@@ -288,6 +284,7 @@ export class UnifiedTools {
           create: 'scene_create_scene',
           save_as: 'scene_save_scene_as',
           close: 'scene_close_scene',
+          soft_reload: 'sceneAdvanced_soft_reload_scene',
         }, args),
         {},
         [
@@ -298,42 +295,35 @@ export class UnifiedTools {
           { name: 'create', description: 'Create a scene at savePath. sceneName is optional and defaults to the filename in savePath.', properties: ['sceneName', 'savePath', 'autoCreateCanvas'], required: ['savePath'], example: { action: 'create', savePath: 'db://assets/scenes/Main.scene', sceneName: 'Main', autoCreateCanvas: true } },
           { name: 'save_as', description: 'Save the current scene at a new path.', properties: ['savePath'], required: ['savePath'] },
           { name: 'close', description: 'Close the current scene.' },
+          { name: 'soft_reload', description: 'Soft-reload the current scene.' },
         ],
       ),
       this.createTool(
         'scene_hierarchy',
-        'Read the editor scene hierarchy. Use this before node writes because node names are not unique. Actions: get.',
-        ['get'],
-        ['includeComponents'],
+        'Read the editor scene hierarchy or a bounded subtree. Use this before node writes because node names are not unique. Actions: get_tree.',
+        ['get_tree'],
+        ['includeComponents', 'rootUuid', 'maxDepth'],
         args => this.routeLegacyAction('scene_hierarchy', {
-          get: 'scene_get_scene_hierarchy',
+          get_tree: 'scene_get_scene_hierarchy',
         }, args),
         {},
         [
-          { name: 'get', description: 'Read the scene hierarchy.', properties: ['includeComponents'], example: { action: 'get', includeComponents: true } },
+          { name: 'get_tree', description: 'Read the scene hierarchy or a subtree with optional component details and depth limit.', properties: ['includeComponents', 'rootUuid', 'maxDepth'], example: { action: 'get_tree', includeComponents: true, maxDepth: 3 } },
         ],
       ),
       this.createTool(
-        'scene_execution_control',
-        'Run registered scene-side operations and readiness checks. For execute_component_method, `uuid` (the component instance UUID) and `name` (the component method name) are required. execute_scene_script requires the extension package name and exported method; restore_prefab requires nodeUuid and assetUuid. execute_scene_script cannot evaluate arbitrary JavaScript. Actions: execute_component_method, execute_scene_script, restore_prefab, soft_reload, query_ready, query_dirty.',
-        ['execute_component_method', 'execute_scene_script', 'restore_prefab', 'soft_reload', 'query_ready', 'query_dirty'],
-        ['uuid', 'nodeUuid', 'assetUuid', 'name', 'method', 'args'],
-        args => this.routeLegacyAction('scene_execution_control', {
+        'scene_execution',
+        'Run registered scene-side operations. For execute_component_method, `uuid` (the component instance UUID) and `name` (the component method name) are required. execute_scene_script requires the extension package name and exported method. execute_scene_script cannot evaluate arbitrary JavaScript. Actions: execute_component_method, execute_scene_script.',
+        ['execute_component_method', 'execute_scene_script'],
+        ['uuid', 'name', 'method', 'args'],
+        args => this.routeLegacyAction('scene_execution', {
           execute_component_method: 'sceneAdvanced_execute_component_method',
           execute_scene_script: 'sceneAdvanced_execute_scene_script',
-          restore_prefab: 'sceneAdvanced_restore_prefab',
-          soft_reload: 'sceneAdvanced_soft_reload_scene',
-          query_ready: 'sceneAdvanced_query_scene_ready',
-          query_dirty: 'sceneAdvanced_query_scene_dirty',
         }, args),
         {},
         [
           { name: 'execute_component_method', description: 'Run a registered method on a component instance.', properties: ['uuid', 'name', 'args'], required: ['uuid', 'name'] },
           { name: 'execute_scene_script', description: 'Run a registered extension scene method; arbitrary JavaScript is not allowed.', properties: ['name', 'method', 'args'], required: ['name', 'method'] },
-          { name: 'restore_prefab', description: 'Restore a prefab instance via scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
-          { name: 'soft_reload', description: 'Soft-reload the current scene.' },
-          { name: 'query_ready', description: 'Check whether the scene is ready for operations.' },
-          { name: 'query_dirty', description: 'Check whether the scene has unsaved changes.' },
         ],
       ),
       this.createTool(
@@ -353,53 +343,55 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_query',
-        'Query scene-level classes, components, script usage, and asset references. Use before component or reference writes when exact types are unknown. Actions: classes, components, nodes_by_asset_uuid, component_has_script, get_info.',
-        ['classes', 'components', 'nodes_by_asset_uuid', 'component_has_script', 'get_info'],
-        ['extends', 'assetUuid', 'className'],
+        'Query scene-level classes, components, script usage, readiness, and dirty state. Use before component writes when exact types are unknown. Actions: list_classes, list_components, check_component_has_script, get_info, check_ready, check_dirty.',
+        ['list_classes', 'list_components', 'check_component_has_script', 'get_info', 'check_ready', 'check_dirty'],
+        ['extends', 'className'],
         args => this.routeLegacyAction('scene_query', {
-          classes: 'sceneAdvanced_query_scene_classes',
-          components: 'sceneAdvanced_query_scene_components',
-          nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
-          component_has_script: 'sceneAdvanced_query_component_has_script',
+          list_classes: 'sceneAdvanced_query_scene_classes',
+          list_components: 'sceneAdvanced_query_scene_components',
+          check_component_has_script: 'sceneAdvanced_query_component_has_script',
           get_info: 'sceneAdvanced_query_scene_info',
+          check_ready: 'sceneAdvanced_query_scene_ready',
+          check_dirty: 'sceneAdvanced_query_scene_dirty',
         }, args),
         {},
         [
-          { name: 'classes', description: 'List scene classes, optionally filtered by base class.', properties: ['extends'] },
-          { name: 'components', description: 'List scene components.' },
-          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes referencing an asset.', properties: ['assetUuid'], required: ['assetUuid'] },
-          { name: 'component_has_script', description: 'Check whether a component has a script class.', properties: ['className'], required: ['className'] },
+          { name: 'list_classes', description: 'List scene classes, optionally filtered by base class.', properties: ['extends'] },
+          { name: 'list_components', description: 'List scene components.' },
+          { name: 'check_component_has_script', description: 'Check whether a component has a script class.', properties: ['className'], required: ['className'] },
           { name: 'get_info', description: 'Get scene information.' },
+          { name: 'check_ready', description: 'Check whether the scene is ready for operations.' },
+          { name: 'check_dirty', description: 'Check whether the scene has unsaved changes.' },
         ],
       ),
       this.createTool(
         'scene_view_control',
-        'Control the editor scene view and camera. Pass UUIDs from node_query/scene_hierarchy; use query tool first when current view state matters. Actions: change_gizmo_tool, change_gizmo_pivot, change_gizmo_coordinate, change_view_mode, set_grid_visible, set_icon_gizmo_3d, set_icon_gizmo_size, focus_camera_on_nodes, align_camera_with_view, align_view_with_node, reset.',
-        ['change_gizmo_tool', 'change_gizmo_pivot', 'change_gizmo_coordinate', 'change_view_mode', 'set_grid_visible', 'set_icon_gizmo_3d', 'set_icon_gizmo_size', 'focus_camera_on_nodes', 'align_camera_with_view', 'align_view_with_node', 'reset'],
+        'Control the editor scene view and camera. Pass UUIDs from node_query/scene_hierarchy; use query tool first when current view state matters. Actions: set_gizmo_tool, set_gizmo_pivot, set_gizmo_coordinate, set_view_mode, set_grid_visible, set_icon_gizmo_3d, set_icon_gizmo_size, focus_nodes, align_camera_with_view, align_view_with_node, reset.',
+        ['set_gizmo_tool', 'set_gizmo_pivot', 'set_gizmo_coordinate', 'set_view_mode', 'set_grid_visible', 'set_icon_gizmo_3d', 'set_icon_gizmo_size', 'focus_nodes', 'align_camera_with_view', 'align_view_with_node', 'reset'],
         ['name', 'type', 'visible', 'is3D', 'size', 'is2D', 'uuids'],
         args => this.routeLegacyAction('scene_view_control', {
-          change_gizmo_tool: 'sceneView_change_gizmo_tool',
-          change_gizmo_pivot: 'sceneView_change_gizmo_pivot',
-          change_gizmo_coordinate: 'sceneView_change_gizmo_coordinate',
-          change_view_mode: 'sceneView_change_view_mode_2d_3d',
+          set_gizmo_tool: 'sceneView_change_gizmo_tool',
+          set_gizmo_pivot: 'sceneView_change_gizmo_pivot',
+          set_gizmo_coordinate: 'sceneView_change_gizmo_coordinate',
+          set_view_mode: 'sceneView_change_view_mode_2d_3d',
           set_grid_visible: 'sceneView_set_grid_visible',
           set_icon_gizmo_3d: 'sceneView_set_icon_gizmo_3d',
           set_icon_gizmo_size: 'sceneView_set_icon_gizmo_size',
-          focus_camera_on_nodes: 'sceneView_focus_camera_on_nodes',
+          focus_nodes: 'sceneView_focus_camera_on_nodes',
           align_camera_with_view: 'sceneView_align_camera_with_view',
           align_view_with_node: 'sceneView_align_view_with_node',
           reset: 'sceneView_reset_scene_view',
         }, args),
         {},
         [
-          { name: 'change_gizmo_tool', description: 'Change the active gizmo tool.', properties: ['name'], required: ['name'], example: { action: 'change_gizmo_tool', name: 'position' } },
-          { name: 'change_gizmo_pivot', description: 'Change the gizmo pivot mode.', properties: ['name'], required: ['name'] },
-          { name: 'change_gizmo_coordinate', description: 'Change gizmo coordinates.', properties: ['type'], required: ['type'] },
-          { name: 'change_view_mode', description: 'Switch the scene view between 2D and 3D.', properties: ['is2D'], required: ['is2D'] },
+          { name: 'set_gizmo_tool', description: 'Change the active gizmo tool.', properties: ['name'], required: ['name'], example: { action: 'set_gizmo_tool', name: 'position' } },
+          { name: 'set_gizmo_pivot', description: 'Change the gizmo pivot mode.', properties: ['name'], required: ['name'] },
+          { name: 'set_gizmo_coordinate', description: 'Change gizmo coordinates.', properties: ['type'], required: ['type'] },
+          { name: 'set_view_mode', description: 'Switch the scene view between 2D and 3D.', properties: ['is2D'], required: ['is2D'] },
           { name: 'set_grid_visible', description: 'Show or hide the scene grid.', properties: ['visible'], required: ['visible'] },
           { name: 'set_icon_gizmo_3d', description: 'Set IconGizmo 3D mode.', properties: ['is3D'], required: ['is3D'] },
           { name: 'set_icon_gizmo_size', description: 'Set IconGizmo size.', properties: ['size'], required: ['size'] },
-          { name: 'focus_camera_on_nodes', description: 'Focus the scene camera on node UUIDs, or null for all.', properties: ['uuids'], required: ['uuids'] },
+          { name: 'focus_nodes', description: 'Focus the scene camera on node UUIDs, or null for all.', properties: ['uuids'], required: ['uuids'] },
           { name: 'align_camera_with_view', description: 'Apply the scene view camera pose to the selected node.' },
           { name: 'align_view_with_node', description: 'Align the scene view to the selected node.' },
           { name: 'reset', description: 'Reset the scene view.' },
@@ -407,39 +399,39 @@ export class UnifiedTools {
       ),
       this.createTool(
         'scene_view_query',
-        'Query editor scene view state before view or camera changes. Actions: get_status, gizmo_tool, gizmo_pivot, gizmo_view_mode, gizmo_coordinate, view_mode, grid_visible, icon_gizmo_3d, icon_gizmo_size.',
-        ['get_status', 'gizmo_tool', 'gizmo_pivot', 'gizmo_view_mode', 'gizmo_coordinate', 'view_mode', 'grid_visible', 'icon_gizmo_3d', 'icon_gizmo_size'],
+        'Query editor scene view state before view or camera changes. Actions: get_status, get_gizmo_tool, get_gizmo_pivot, get_gizmo_view_mode, get_gizmo_coordinate, get_view_mode, get_grid_visible, get_icon_gizmo_3d, get_icon_gizmo_size.',
+        ['get_status', 'get_gizmo_tool', 'get_gizmo_pivot', 'get_gizmo_view_mode', 'get_gizmo_coordinate', 'get_view_mode', 'get_grid_visible', 'get_icon_gizmo_3d', 'get_icon_gizmo_size'],
         [],
         args => this.routeLegacyAction('scene_view_query', {
           get_status: 'sceneView_get_scene_view_status',
-          gizmo_tool: 'sceneView_query_gizmo_tool_name',
-          gizmo_pivot: 'sceneView_query_gizmo_pivot',
-          gizmo_view_mode: 'sceneView_query_gizmo_view_mode',
-          gizmo_coordinate: 'sceneView_query_gizmo_coordinate',
-          view_mode: 'sceneView_query_view_mode_2d_3d',
-          grid_visible: 'sceneView_query_grid_visible',
-          icon_gizmo_3d: 'sceneView_query_icon_gizmo_3d',
-          icon_gizmo_size: 'sceneView_query_icon_gizmo_size',
+          get_gizmo_tool: 'sceneView_query_gizmo_tool_name',
+          get_gizmo_pivot: 'sceneView_query_gizmo_pivot',
+          get_gizmo_view_mode: 'sceneView_query_gizmo_view_mode',
+          get_gizmo_coordinate: 'sceneView_query_gizmo_coordinate',
+          get_view_mode: 'sceneView_query_view_mode_2d_3d',
+          get_grid_visible: 'sceneView_query_grid_visible',
+          get_icon_gizmo_3d: 'sceneView_query_icon_gizmo_3d',
+          get_icon_gizmo_size: 'sceneView_query_icon_gizmo_size',
         }, args),
         {},
         [
           { name: 'get_status', description: 'Get complete scene-view status.' },
-          { name: 'gizmo_tool', description: 'Get the active gizmo tool.' },
-          { name: 'gizmo_pivot', description: 'Get the gizmo pivot mode.' },
-          { name: 'gizmo_view_mode', description: 'Get the gizmo view/select mode.' },
-          { name: 'gizmo_coordinate', description: 'Get the gizmo coordinate system.' },
-          { name: 'view_mode', description: 'Get whether the scene view is 2D or 3D.' },
-          { name: 'grid_visible', description: 'Get grid visibility.' },
-          { name: 'icon_gizmo_3d', description: 'Get IconGizmo 3D mode.' },
-          { name: 'icon_gizmo_size', description: 'Get IconGizmo size.' },
+          { name: 'get_gizmo_tool', description: 'Get the active gizmo tool.' },
+          { name: 'get_gizmo_pivot', description: 'Get the gizmo pivot mode.' },
+          { name: 'get_gizmo_view_mode', description: 'Get the gizmo view/select mode.' },
+          { name: 'get_gizmo_coordinate', description: 'Get the gizmo coordinate system.' },
+          { name: 'get_view_mode', description: 'Get whether the scene view is 2D or 3D.' },
+          { name: 'get_grid_visible', description: 'Get grid visibility.' },
+          { name: 'get_icon_gizmo_3d', description: 'Get IconGizmo 3D mode.' },
+          { name: 'get_icon_gizmo_size', description: 'Get IconGizmo size.' },
         ],
       ),
       this.createTool(
-        'scene_undo_manage',
+        'scene_undo',
         'Manage explicit editor undo records for multi-step scene edits. begin requires nodeUuid or nodeUuids containing every target whose state must be captured; label becomes the Undo menu tag. Save data.undoId and pass it to end or cancel. Actions: begin, end, cancel.',
         ['begin', 'end', 'cancel'],
         ['nodeUuid', 'nodeUuids', 'label', 'undoId'],
-        args => this.routeLegacyAction('scene_undo_manage', {
+        args => this.routeLegacyAction('scene_undo', {
           begin: 'sceneAdvanced_begin_undo_recording',
           end: 'sceneAdvanced_end_undo_recording',
           cancel: 'sceneAdvanced_cancel_undo_recording',
@@ -453,23 +445,23 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_query',
-        'Query nodes by UUID, name, pattern, or list all nodes. Use before write operations because node names are not unique. Actions: get_info, find, find_by_name, get_all, detect_type.',
-        ['get_info', 'find', 'find_by_name', 'get_all', 'detect_type'],
+        'Query nodes by UUID, name, pattern, or list all nodes. Use before write operations because node names are not unique. Actions: get, find, find_by_name, list, check_type.',
+        ['get', 'find', 'find_by_name', 'list', 'check_type'],
         ['uuid', 'pattern', 'name', 'exactMatch'],
         args => this.routeLegacyAction('node_query', {
-          get_info: 'node_get_node_info',
+          get: 'node_get_node_info',
           find: 'node_find_nodes',
           find_by_name: 'node_find_node_by_name',
-          get_all: 'node_get_all_nodes',
-          detect_type: 'node_detect_node_type',
+          list: 'node_get_all_nodes',
+          check_type: 'node_detect_node_type',
         }, args),
         {},
         [
-          { name: 'get_info', description: 'Get a node by UUID.', properties: ['uuid'], required: ['uuid'], example: { action: 'get_info', uuid: '<node-uuid>' } },
+          { name: 'get', description: 'Get a node by UUID.', properties: ['uuid'], required: ['uuid'], example: { action: 'get', uuid: '<node-uuid>' } },
           { name: 'find', description: 'Find nodes by name pattern.', properties: ['pattern'], required: ['pattern'], example: { action: 'find', pattern: 'Player' } },
           { name: 'find_by_name', description: 'Find nodes by name.', properties: ['name', 'exactMatch'], required: ['name'], example: { action: 'find_by_name', name: 'Player', exactMatch: true } },
-          { name: 'get_all', description: 'List all scene nodes.' },
-          { name: 'detect_type', description: 'Detect whether a node is 2D or 3D.', properties: ['uuid'], required: ['uuid'] },
+          { name: 'list', description: 'List all scene nodes.' },
+          { name: 'check_type', description: 'Detect whether a node is 2D or 3D.', properties: ['uuid'], required: ['uuid'] },
         ],
       ),
       this.createTool(
@@ -491,36 +483,28 @@ export class UnifiedTools {
       ),
       this.createTool(
         'node_transform',
-        'Set node transform or direct node property by UUID. Query the node first and prefer set_transform for position/rotation/scale. Actions: set_transform, set_property.',
-        ['set_transform', 'set_property'],
-        ['uuid', 'property', 'value', 'position', 'rotation', 'scale'],
+        'Set node position, rotation, or scale by UUID. Query the node first. Actions: set.',
+        ['set'],
+        ['uuid', 'position', 'rotation', 'scale'],
         args => this.routeLegacyAction('node_transform', {
-          set_transform: 'node_set_node_transform',
-          set_property: 'node_set_node_property',
+          set: 'node_set_node_transform',
         }, args),
         {},
         [
-          { name: 'set_transform', description: 'Set one or more transform values.', properties: ['uuid', 'position', 'rotation', 'scale'], required: ['uuid'], example: { action: 'set_transform', uuid: '<node-uuid>', position: { x: 0, y: 1, z: 0 } } },
-          { name: 'set_property', description: 'Set a direct node property.', properties: ['uuid', 'property', 'value'], required: ['uuid', 'property', 'value'] },
+          { name: 'set', description: 'Set one or more transform values.', properties: ['uuid', 'position', 'rotation', 'scale'], required: ['uuid'], example: { action: 'set', uuid: '<node-uuid>', position: { x: 0, y: 1, z: 0 } } },
         ],
       ),
       this.createTool(
         'node_hierarchy',
-        'Move nodes or use editor clipboard operations. Use UUIDs from node_query; keepWorldTransform controls whether visual placement is preserved. Actions: move, copy, paste, cut.',
-        ['move', 'copy', 'paste', 'cut'],
-        ['uuid', 'uuids', 'nodeUuid', 'newParentUuid', 'target', 'keepWorldTransform', 'siblingIndex'],
+        'Move nodes to a new parent. Use UUIDs from node_query; keepWorldTransform controls whether visual placement is preserved. Actions: move.',
+        ['move'],
+        ['nodeUuid', 'newParentUuid', 'keepWorldTransform', 'siblingIndex'],
         args => this.routeLegacyAction('node_hierarchy', {
           move: 'node_move_node',
-          copy: 'sceneAdvanced_copy_node',
-          paste: 'sceneAdvanced_paste_node',
-          cut: 'sceneAdvanced_cut_node',
         }, args),
         {},
         [
           { name: 'move', description: 'Move a node to a new parent.', properties: ['nodeUuid', 'newParentUuid', 'keepWorldTransform', 'siblingIndex'], required: ['nodeUuid', 'newParentUuid'], example: { action: 'move', nodeUuid: '<node-uuid>', newParentUuid: '<parent-uuid>' } },
-          { name: 'copy', description: 'Copy one or more nodes to the editor clipboard.', properties: ['uuid', 'uuids'] },
-          { name: 'paste', description: 'Paste clipboard nodes under a target.', properties: ['target', 'keepWorldTransform'], required: ['target'] },
-          { name: 'cut', description: 'Cut one or more nodes to the editor clipboard.', properties: ['uuid', 'uuids'] },
         ],
       ),
       this.createTool(
@@ -541,52 +525,39 @@ export class UnifiedTools {
         ],
       ),
       this.createTool(
-        'node_property_management',
-        'Reset node properties/transforms or edit array properties. Query node info first and pass exact property paths. Actions: reset_property, reset_transform, move_array_element, remove_array_element.',
-        ['reset_property', 'reset_transform', 'move_array_element', 'remove_array_element'],
-        ['uuid', 'path', 'target', 'offset', 'index'],
-        args => this.routeLegacyAction('node_property_management', {
-          reset_property: 'sceneAdvanced_reset_node_property',
+        'node_property',
+        'Set or reset node properties/transforms, or edit array properties. Query node info first and pass exact property paths. Actions: set, reset, reset_transform, move_array_element, remove_array_element.',
+        ['set', 'reset', 'reset_transform', 'move_array_element', 'remove_array_element'],
+        ['uuid', 'property', 'value', 'path', 'target', 'offset', 'index'],
+        args => this.routeLegacyAction('node_property', {
+          set: 'node_set_node_property',
+          reset: 'sceneAdvanced_reset_node_property',
           reset_transform: 'sceneAdvanced_reset_node_transform',
           move_array_element: 'sceneAdvanced_move_array_element',
           remove_array_element: 'sceneAdvanced_remove_array_element',
         }, args),
         {},
         [
-          { name: 'reset_property', description: 'Reset one node property to its default.', properties: ['uuid', 'path'], required: ['uuid', 'path'], example: { action: 'reset_property', uuid: '<node-uuid>', path: 'position' } },
+          { name: 'set', description: 'Set a direct node property.', properties: ['uuid', 'property', 'value'], required: ['uuid', 'property', 'value'] },
+          { name: 'reset', description: 'Reset one node property to its default.', properties: ['uuid', 'path'], required: ['uuid', 'path'], example: { action: 'reset', uuid: '<node-uuid>', path: 'position' } },
           { name: 'reset_transform', description: 'Reset node position, rotation, and scale.', properties: ['uuid'], required: ['uuid'] },
           { name: 'move_array_element', description: 'Move an array element by index offset.', properties: ['uuid', 'path', 'target', 'offset'], required: ['uuid', 'path', 'target', 'offset'] },
           { name: 'remove_array_element', description: 'Remove an array element by index.', properties: ['uuid', 'path', 'index'], required: ['uuid', 'path', 'index'] },
         ],
       ),
       this.createTool(
-        'node_reference',
-        'Find nodes that reference an asset or restore prefab linkage. Use asset_query to obtain assetUuid first. Actions: nodes_by_asset_uuid, restore_prefab.',
-        ['nodes_by_asset_uuid', 'restore_prefab'],
-        ['assetUuid', 'nodeUuid'],
-        args => this.routeLegacyAction('node_reference', {
-          nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
-          restore_prefab: 'sceneAdvanced_restore_prefab',
-        }, args),
-        {},
-        [
-          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes that reference an asset UUID.', properties: ['assetUuid'], required: ['assetUuid'] },
-          { name: 'restore_prefab', description: 'Restore a prefab instance through scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
-        ],
-      ),
-      this.createTool(
-        'component_manage',
-        'Add or remove components on a node. Before remove, call component_query.get_components and prefer the returned component instance uuid; type and cid are also accepted. Actions: add, remove.',
+        'component_lifecycle',
+        'Add or remove components on a node. Before remove, call component_query.list and prefer the returned component instance uuid; type and cid are also accepted. Actions: add, remove.',
         ['add', 'remove'],
         ['nodeUuid', 'componentType'],
-        args => this.routeLegacyAction('component_manage', {
+        args => this.routeLegacyAction('component_lifecycle', {
           add: 'component_add_component',
           remove: 'component_remove_component',
         }, args),
         {},
         [
           { name: 'add', description: 'Add a component to a node.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'add', nodeUuid: '<node-uuid>', componentType: 'cc.Camera' } },
-          { name: 'remove', description: 'Remove a component from a node. First call component_query.get_components. Pass the component instance `uuid` returned there when available; `type`/`cid` are fallback identities only.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'remove', nodeUuid: '<node-uuid>', componentType: '<component-instance-uuid>' } },
+          { name: 'remove', description: 'Remove a component from a node. First call component_query.list. Pass the component instance `uuid` returned there when available; `type`/`cid` are fallback identities only.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'remove', nodeUuid: '<node-uuid>', componentType: '<component-instance-uuid>' } },
         ],
       ),
       this.createTool(
@@ -601,59 +572,57 @@ export class UnifiedTools {
         {},
         [
           { name: 'attach', description: 'Attach a script component to a node.', properties: ['nodeUuid', 'scriptPath'], required: ['nodeUuid', 'scriptPath'], example: { action: 'attach', nodeUuid: '<node-uuid>', scriptPath: 'db://assets/scripts/Player.ts' } },
-          { name: 'detach', description: 'Detach a script component from a node. First call component_query.get_components and pass the script component instance `uuid` as componentType; do not pass the script asset UUID.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'detach', nodeUuid: '<node-uuid>', componentType: '<script-component-instance-uuid>' } },
+          { name: 'detach', description: 'Detach a script component from a node. First call component_query.list and pass the script component instance `uuid` as componentType; do not pass the script asset UUID.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid', 'componentType'], example: { action: 'detach', nodeUuid: '<node-uuid>', componentType: '<script-component-instance-uuid>' } },
         ],
       ),
       this.createTool(
         'component_query',
-        'Query node components and component details. Use before component writes/removal to get actual componentType/cid and property names. Actions: get_components, get_info.',
-        ['get_components', 'get_info'],
+        'Query node components and component details. Use before component writes/removal to get actual componentType/cid and property names. Actions: list, get.',
+        ['list', 'get'],
         ['nodeUuid', 'componentType', 'includeProperties'],
         args => this.routeLegacyAction('component_query', {
-          get_components: 'component_get_components',
-          get_info: 'component_get_component_info',
+          list: 'component_get_components',
+          get: 'component_get_component_info',
         }, args),
         {},
         [
-          { name: 'get_components', description: 'List components attached to a node.', properties: ['nodeUuid', 'includeProperties'], required: ['nodeUuid'], example: { action: 'get_components', nodeUuid: '<node-uuid>' } },
-          { name: 'get_info', description: 'Get one component’s details.', properties: ['nodeUuid', 'componentType', 'includeProperties'], required: ['nodeUuid', 'componentType'], example: { action: 'get_info', nodeUuid: '<node-uuid>', componentType: 'cc.Camera' } },
+          { name: 'list', description: 'List components attached to a node.', properties: ['nodeUuid', 'includeProperties'], required: ['nodeUuid'], example: { action: 'list', nodeUuid: '<node-uuid>' } },
+          { name: 'get', description: 'Get one component’s details.', properties: ['nodeUuid', 'componentType', 'includeProperties'], required: ['nodeUuid', 'componentType'], example: { action: 'get', nodeUuid: '<node-uuid>', componentType: 'cc.Camera' } },
         ],
       ),
       this.createTool(
         'component_property',
-        'Set a component property on a node. Query components first when componentType/cid or property names are unknown. `propertyType` is optional and is inferred from the Inspector declaration when omitted. For `propertyType: "component"`, pass either the target component instance UUID or a node UUID; a node UUID is resolved to the matching component instance (for example, a cc.Camera-typed property accepts the Camera node UUID). For cc.MeshRenderer, use `sharedMaterials` (or alias `materials`) with `propertyType: "assetArray"` and an array of material UUIDs. Vec3 declarations such as cc.BoxCollider.size require `{x,y,z}` and are written as Vec3 even if a caller supplies the ambiguous `size` type. Example: {"action":"set_property","nodeUuid":"<node-uuid>","componentType":"MyScript","property":"camera","propertyType":"component","value":"<camera-node-or-component-uuid>"}. Actions: set, set_property.',
-        ['set', 'set_property'],
+        'Set a component property on a node. Query components first when componentType/cid or property names are unknown. `propertyType` is optional and is inferred from the Inspector declaration when omitted. For `propertyType: "component"`, pass either the target component instance UUID or a node UUID; a node UUID is resolved to the matching component instance (for example, a cc.Camera-typed property accepts the Camera node UUID). For cc.MeshRenderer, use `sharedMaterials` (or alias `materials`) with `propertyType: "assetArray"` and an array of material UUIDs. Vec3 declarations such as cc.BoxCollider.size require `{x,y,z}` and are written as Vec3 even if a caller supplies the ambiguous `size` type. Example: {"action":"set","nodeUuid":"<node-uuid>","componentType":"MyScript","property":"camera","propertyType":"component","value":"<camera-node-or-component-uuid>"}. Actions: set.',
+        ['set'],
         ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'],
         args => this.routeLegacyAction('component_property', {
           set: 'component_set_component_property',
-          set_property: 'component_set_component_property',
         }, args),
         {},
         [
-          { name: 'set', description: 'Set a component property.', properties: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'], required: ['nodeUuid', 'componentType', 'property', 'value'] },
-          { name: 'set_property', description: 'Set a component property.', properties: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'], required: ['nodeUuid', 'componentType', 'property', 'value'], example: { action: 'set_property', nodeUuid: '<node-uuid>', componentType: 'MyScript', property: 'camera', propertyType: 'component', value: '<camera-node-or-component-uuid>' } },
+          { name: 'set', description: 'Set a component property.', properties: ['nodeUuid', 'componentType', 'property', 'propertyType', 'value'], required: ['nodeUuid', 'componentType', 'property', 'value'], example: { action: 'set', nodeUuid: '<node-uuid>', componentType: 'MyScript', property: 'camera', propertyType: 'component', value: '<camera-node-or-component-uuid>' } },
         ],
       ),
       this.createTool(
-        'component_event_binding',
-        'Manage Button click event bindings. Query the Button component and target handler node first; set replaces all events, append preserves existing ones. Actions: get_button_events, clear_button_events, set_button_events, append_button_event.',
-        ['get_button_events', 'clear_button_events', 'set_button_events', 'append_button_event'],
+        'component_event',
+        'Manage Button click event bindings. Query the Button component and target handler node first; set replaces all events, append preserves existing ones. Actions: list, clear, set, append.',
+        ['list', 'clear', 'set', 'append'],
         ['nodeUuid', 'componentType', 'events', 'targetNodeUuid', 'component', 'handler', 'customEventData'],
         args => this.handleComponentEventBinding(args),
         {},
         [
-          { name: 'get_button_events', description: 'Get Button click event bindings.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid'] },
-          { name: 'clear_button_events', description: 'Remove all Button click event bindings.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid'] },
-          { name: 'set_button_events', description: 'Replace all Button click event bindings.', properties: ['nodeUuid', 'componentType', 'events'], required: ['nodeUuid', 'events'] },
-          { name: 'append_button_event', description: 'Append one Button click event binding.', properties: ['nodeUuid', 'componentType', 'targetNodeUuid', 'component', 'handler', 'customEventData'], required: ['nodeUuid', 'targetNodeUuid', 'component', 'handler'], example: { action: 'append_button_event', nodeUuid: '<button-node-uuid>', targetNodeUuid: '<handler-node-uuid>', component: 'GameController', handler: 'onStart' } },
+          { name: 'list', description: 'Get Button click event bindings.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid'] },
+          { name: 'clear', description: 'Remove all Button click event bindings.', properties: ['nodeUuid', 'componentType'], required: ['nodeUuid'] },
+          { name: 'set', description: 'Replace all Button click event bindings.', properties: ['nodeUuid', 'componentType', 'events'], required: ['nodeUuid', 'events'] },
+          { name: 'append', description: 'Append one Button click event binding.', properties: ['nodeUuid', 'componentType', 'targetNodeUuid', 'component', 'handler', 'customEventData'], required: ['nodeUuid', 'targetNodeUuid', 'component', 'handler'], example: { action: 'append', nodeUuid: '<button-node-uuid>', targetNodeUuid: '<handler-node-uuid>', component: 'GameController', handler: 'onStart' } },
         ],
       ),
       this.createTool(
-        'component_available',
+        'component_catalog',
         'List available component types for adding new components. Use component_query for components already on a node. Actions: list.',
         ['list'],
         ['category'],
-        args => this.routeLegacyAction('component_available', {
+        args => this.routeLegacyAction('component_catalog', {
           list: 'component_get_available_components',
         }, args),
         {},
@@ -662,21 +631,21 @@ export class UnifiedTools {
         ],
       ),
       this.createTool(
-        'prefab_browse',
-        'Browse and inspect prefab assets. Use this before instantiate/update when prefabPath is unknown. Actions: list, load, info, validate.',
-        ['list', 'load', 'info', 'validate'],
+        'prefab_query',
+        'Browse and inspect prefab assets. Use this before instantiate/update when prefabPath is unknown. Actions: list, load, get, validate.',
+        ['list', 'load', 'get', 'validate'],
         ['folder', 'prefabPath'],
-        args => this.routeLegacyAction('prefab_browse', {
+        args => this.routeLegacyAction('prefab_query', {
           list: 'prefab_get_prefab_list',
           load: 'prefab_load_prefab',
-          info: 'prefab_get_prefab_info',
+          get: 'prefab_get_prefab_info',
           validate: 'prefab_validate_prefab',
         }, args),
         {},
         [
           { name: 'list', description: 'List prefabs, optionally within a folder.', properties: ['folder'], example: { action: 'list', folder: 'db://assets/prefabs' } },
           { name: 'load', description: 'Load a prefab by asset path.', properties: ['prefabPath'], required: ['prefabPath'] },
-          { name: 'info', description: 'Get detailed prefab information.', properties: ['prefabPath'], required: ['prefabPath'] },
+          { name: 'get', description: 'Get detailed prefab information.', properties: ['prefabPath'], required: ['prefabPath'] },
           { name: 'validate', description: 'Validate a prefab file.', properties: ['prefabPath'], required: ['prefabPath'] },
         ],
       ),
@@ -697,59 +666,42 @@ export class UnifiedTools {
       ),
       this.createTool(
         'prefab_instance',
-        'Instantiate prefabs or revert/restore existing prefab instances. instantiate and restore only succeed after query-nodes-by-asset-uuid verifies the association. restore is not a generic conversion from an ordinary node. Actions: instantiate, revert, restore_node, restore.',
-        ['instantiate', 'revert', 'restore_node', 'restore'],
+        'Instantiate prefabs or revert/restore existing prefab instances. instantiate and restore only succeed after asset_reference.nodes_by_asset_uuid verifies the association. restore is not a generic conversion from an ordinary node. Actions: instantiate, revert, restore.',
+        ['instantiate', 'revert', 'restore'],
         ['prefabPath', 'parentUuid', 'position', 'nodeUuid', 'assetUuid'],
         args => this.routeLegacyAction('prefab_instance', {
           instantiate: 'prefab_instantiate_prefab',
           revert: 'prefab_revert_prefab',
-          restore_node: 'prefab_restore_prefab_node',
           restore: 'sceneAdvanced_restore_prefab',
         }, args),
         {},
         [
           { name: 'instantiate', description: 'Instantiate a prefab in the scene.', properties: ['prefabPath', 'parentUuid', 'position'], required: ['prefabPath'], example: { action: 'instantiate', prefabPath: 'db://assets/prefabs/Player.prefab', parentUuid: '<parent-uuid>' } },
           { name: 'revert', description: 'Discard overrides on a prefab instance.', properties: ['nodeUuid'], required: ['nodeUuid'] },
-          { name: 'restore_node', description: 'Restore a prefab instance node using its prefab asset.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
-          { name: 'restore', description: 'Restore a prefab instance through scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
+          { name: 'restore', description: 'Restore and verify a prefab instance association through scene IPC.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
         ],
       ),
       this.createTool(
         'prefab_edit',
-        'Apply or discard prefab instance overrides. Use update to write instance changes back to the prefab asset; use revert to discard them. Actions: update, revert.',
-        ['update', 'revert'],
+        'Apply or discard prefab instance overrides. Use apply to write instance changes back to the prefab asset; use revert to discard them. Actions: apply, revert.',
+        ['apply', 'revert'],
         ['prefabPath', 'nodeUuid'],
         args => this.routeLegacyAction('prefab_edit', {
-          update: 'prefab_update_prefab',
+          apply: 'prefab_update_prefab',
           revert: 'prefab_revert_prefab',
         }, args),
         {},
         [
-          { name: 'update', description: 'Apply an instance’s overrides to its prefab asset.', properties: ['prefabPath', 'nodeUuid'], required: ['prefabPath', 'nodeUuid'] },
+          { name: 'apply', description: 'Apply an instance’s overrides to its prefab asset.', properties: ['prefabPath', 'nodeUuid'], required: ['prefabPath', 'nodeUuid'] },
           { name: 'revert', description: 'Discard prefab instance overrides.', properties: ['nodeUuid'], required: ['nodeUuid'] },
         ],
       ),
       this.createTool(
-        'prefab_reference',
-        'Restore prefab nodes or find scene nodes using a prefab/asset UUID. Query assetUuid first. Actions: restore_node, nodes_by_asset_uuid.',
-        ['restore_node', 'nodes_by_asset_uuid'],
-        ['nodeUuid', 'assetUuid'],
-        args => this.routeLegacyAction('prefab_reference', {
-          restore_node: 'prefab_restore_prefab_node',
-          nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
-        }, args),
-        {},
-        [
-          { name: 'restore_node', description: 'Restore a prefab node from its asset.', properties: ['nodeUuid', 'assetUuid'], required: ['nodeUuid', 'assetUuid'] },
-          { name: 'nodes_by_asset_uuid', description: 'Find scene nodes referencing an asset UUID.', properties: ['assetUuid'], required: ['assetUuid'] },
-        ],
-      ),
-      this.createTool(
-        'asset_manage',
-        'Create, import, move, delete, save, or reimport assets. Query/generate URLs first and distinguish asset URL from filesystem path. Actions: import, create, copy, move, delete, save, reimport, open_external, create_default_spriteframe.',
-        ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport', 'open_external', 'create_default_spriteframe'],
-        ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target', 'urlOrUUID', 'color', 'size', 'savePath'],
-        args => this.routeLegacyAction('asset_manage', {
+        'asset_lifecycle',
+        'Create, import, move, delete, save, reimport, or refresh assets. Query/generate URLs first and distinguish asset URL from filesystem path. Actions: import, create, copy, move, delete, save, reimport, refresh, open_external, create_default_spriteframe.',
+        ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport', 'refresh', 'open_external', 'create_default_spriteframe'],
+        ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target', 'urlOrUUID', 'color', 'size', 'savePath', 'folder'],
+        args => this.routeLegacyAction('asset_lifecycle', {
           import: 'project_import_asset',
           create: 'project_create_asset',
           copy: 'project_copy_asset',
@@ -757,6 +709,7 @@ export class UnifiedTools {
           delete: 'project_delete_asset',
           save: 'project_save_asset',
           reimport: 'project_reimport_asset',
+          refresh: 'project_refresh_assets',
           open_external: 'assetAdvanced_open_asset_external',
           create_default_spriteframe: 'assetAdvanced_create_default_spriteframe',
         }, args),
@@ -769,124 +722,111 @@ export class UnifiedTools {
           { name: 'delete', description: 'Delete an asset by URL.', properties: ['url'], required: ['url'] },
           { name: 'save', description: 'Save text content to an asset URL.', properties: ['url', 'content'], required: ['url', 'content'] },
           { name: 'reimport', description: 'Reimport an asset by URL.', properties: ['url'], required: ['url'] },
+          { name: 'refresh', description: 'Refresh the asset database after external file changes.', properties: ['folder'], example: { action: 'refresh', folder: 'db://assets/scripts/core' } },
           { name: 'open_external', description: 'Open an asset in its external application.', properties: ['urlOrUUID'], required: ['urlOrUUID'] },
           { name: 'create_default_spriteframe', description: 'Create a solid-color SpriteFrame asset.', properties: ['savePath', 'color', 'size'], example: { action: 'create_default_spriteframe', savePath: 'db://assets/mcp/default-sprite.png', color: '#ffffff', size: 8 } },
         ],
       ),
       this.createTool(
         'asset_query',
-        'Query asset identities and database records. Use resolve_identity before asset writes; it accepts either an asset URL or UUID and returns URL, UUID, and filesystem path. Actions: resolve_identity, get_info, list, query_path, query_uuid, query_url, find_by_name, details, generate_available_url, db_ready.',
-        ['resolve_identity', 'get_info', 'list', 'query_path', 'query_uuid', 'query_url', 'find_by_name', 'details', 'generate_available_url', 'db_ready'],
+        'Query asset identities and database records. Use resolve_identity before asset writes; it accepts either an asset URL or UUID and returns URL, UUID, and filesystem path. Actions: resolve_identity, get, list, find_by_name, get_details, generate_available_url, check_database_ready.',
+        ['resolve_identity', 'get', 'list', 'find_by_name', 'get_details', 'generate_available_url', 'check_database_ready'],
         ['assetPath', 'folder', 'type', 'url', 'uuid', 'name', 'exactMatch', 'assetType', 'maxResults', 'includeSubAssets'],
         args => this.routeLegacyAction('asset_query', {
           resolve_identity: 'project_resolve_asset_identity',
-          get_info: 'project_get_asset_info',
+          get: 'project_get_asset_info',
           list: 'project_get_assets',
-          query_path: 'project_query_asset_path',
-          query_uuid: 'project_query_asset_uuid',
-          query_url: 'project_query_asset_url',
           find_by_name: 'project_find_asset_by_name',
-          details: 'project_get_asset_details',
+          get_details: 'project_get_asset_details',
           generate_available_url: 'assetAdvanced_generate_available_url',
-          db_ready: 'assetAdvanced_query_asset_db_ready',
+          check_database_ready: 'assetAdvanced_query_asset_db_ready',
         }, args),
         {},
         [
           { name: 'resolve_identity', description: 'Resolve an asset URL or UUID to its canonical URL, UUID, and filesystem path.', properties: ['urlOrUUID'], required: ['urlOrUUID'], example: { action: 'resolve_identity', urlOrUUID: 'db://assets/prefabs/Player.prefab' } },
-          { name: 'get_info', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'] },
+          { name: 'get', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'] },
           { name: 'list', description: 'List assets, optionally filtered by type or folder.', properties: ['type', 'folder'] },
-          { name: 'query_path', description: 'Deprecated: convert an asset URL to a filesystem path. Prefer resolve_identity.', properties: ['url'], required: ['url'], status: 'deprecated' },
-          { name: 'query_uuid', description: 'Deprecated: get an asset UUID from an asset URL. Prefer resolve_identity.', properties: ['url'], required: ['url'], status: 'deprecated' },
-          { name: 'query_url', description: 'Deprecated: get an asset URL from a UUID. Prefer resolve_identity.', properties: ['uuid'], required: ['uuid'], status: 'deprecated' },
           { name: 'find_by_name', description: 'Find assets by name.', properties: ['name', 'assetType', 'maxResults'], required: ['name'] },
-          { name: 'details', description: 'Get detailed asset information by URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
+          { name: 'get_details', description: 'Get detailed asset information by URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
           { name: 'generate_available_url', description: 'Generate an unused asset URL based on a requested URL.', properties: ['url'], required: ['url'], example: { action: 'generate_available_url', url: 'db://assets/NewScript.ts' } },
-          { name: 'db_ready', description: 'Check whether the Cocos asset database is ready.' },
+          { name: 'check_database_ready', description: 'Check whether the Cocos asset database is ready.' },
         ],
       ),
       this.createTool(
         'asset_analyze',
-        'Analyze asset references, dependencies, and unused assets. Query exact asset URL/UUID first for focused dependency checks. Actions: validate_references, dependencies, unused.',
-        ['validate_references', 'dependencies', 'unused'],
-        ['directory', 'excludeDirectories', 'urlOrUUID', 'direction'],
+        'Validate asset references, optionally in one directory. Actions: validate_references.',
+        ['validate_references'],
+        ['directory'],
         args => this.routeLegacyAction('asset_analyze', {
           validate_references: 'assetAdvanced_validate_asset_references',
-          dependencies: 'assetAdvanced_get_asset_dependencies',
-          unused: 'assetAdvanced_get_unused_assets',
         }, args),
         {},
         [
           { name: 'validate_references', description: 'Validate asset references, optionally under one directory.', properties: ['directory'] },
-          { name: 'dependencies', description: 'Get dependencies or dependents for an asset.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'], status: 'unsupported', unsupportedReason: 'Cocos Creator 3.8 does not expose the required dependency-analysis IPC. Use Creator’s asset dependency UI.' },
-          { name: 'unused', description: 'Find unused assets, optionally excluding directories.', properties: ['directory', 'excludeDirectories'], status: 'unsupported', unsupportedReason: 'Reliable unused-asset detection is not available through the current Cocos Creator 3.8 IPC. Use Creator’s asset tools or a project-specific analyzer.' },
         ],
       ),
       this.createTool(
         'asset_batch',
-        'Run batch asset operations. Prefer dry planning with asset_query first; batch_delete is destructive. Actions: batch_import, batch_delete, compress_textures, export_manifest.',
-        ['batch_import', 'batch_delete', 'compress_textures', 'export_manifest'],
-        ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite', 'urls', 'directory', 'format', 'quality', 'includeMetadata'],
+        'Run batch asset operations. Prefer dry planning with asset_query first; delete is destructive. Actions: import, delete, export_manifest.',
+        ['import', 'delete', 'export_manifest'],
+        ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite', 'urls', 'directory', 'format', 'includeMetadata'],
         args => this.routeLegacyAction('asset_batch', {
-          batch_import: 'assetAdvanced_batch_import_assets',
-          batch_delete: 'assetAdvanced_batch_delete_assets',
-          compress_textures: 'assetAdvanced_compress_textures',
+          import: 'assetAdvanced_batch_import_assets',
+          delete: 'assetAdvanced_batch_delete_assets',
           export_manifest: 'assetAdvanced_export_asset_manifest',
         }, args),
         {},
         [
-          { name: 'batch_import', description: 'Import files from a filesystem directory.', properties: ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite'], required: ['sourceDirectory', 'targetDirectory'] },
-          { name: 'batch_delete', description: 'Delete multiple asset URLs. This is destructive.', properties: ['urls'], required: ['urls'] },
-          { name: 'compress_textures', description: 'Compress textures in a directory.', properties: ['directory', 'format', 'quality'], status: 'unsupported', unsupportedReason: 'Texture compression is configured through Cocos Creator import/build settings; the current IPC does not expose a safe compression operation.' },
+          { name: 'import', description: 'Import files from a filesystem directory.', properties: ['sourceDirectory', 'targetDirectory', 'fileFilter', 'recursive', 'overwrite'], required: ['sourceDirectory', 'targetDirectory'] },
+          { name: 'delete', description: 'Delete multiple asset URLs. This is destructive.', properties: ['urls'], required: ['urls'] },
           { name: 'export_manifest', description: 'Export an asset manifest.', properties: ['directory', 'format', 'includeMetadata'] },
         ],
       ),
       this.createTool(
         'asset_meta',
-        'Write asset meta content. Use only after querying the target asset URL/UUID and preserving required meta fields. Actions: save_meta.',
-        ['save_meta'],
+        'Write asset meta content. Use only after querying the target asset URL/UUID and preserving required meta fields. Actions: save.',
+        ['save'],
         ['urlOrUUID', 'content'],
         args => this.routeLegacyAction('asset_meta', {
-          save_meta: 'assetAdvanced_save_asset_meta',
+          save: 'assetAdvanced_save_asset_meta',
         }, args),
         {},
         [
-          { name: 'save_meta', description: 'Save serialized meta content for an asset.', properties: ['urlOrUUID', 'content'], required: ['urlOrUUID', 'content'] },
+          { name: 'save', description: 'Save serialized meta content for an asset.', properties: ['urlOrUUID', 'content'], required: ['urlOrUUID', 'content'] },
         ],
       ),
       this.createTool(
-        'project_manage',
-        'Query project information/settings or refresh the asset database. Refresh after external file changes before querying new assets. Example: {"action":"refresh_assets","folder":"db://assets/scripts/core"}. Actions: get_info, get_settings, refresh_assets.',
-        ['get_info', 'get_settings', 'refresh_assets'],
-        ['category', 'folder'],
-        args => this.routeLegacyAction('project_manage', {
+        'project_query',
+        'Query project information and settings. Actions: get_info, get_settings.',
+        ['get_info', 'get_settings'],
+        ['category'],
+        args => this.routeLegacyAction('project_query', {
           get_info: 'project_get_project_info',
           get_settings: 'project_get_project_settings',
-          refresh_assets: 'project_refresh_assets',
         }, args),
         {},
         [
           { name: 'get_info', description: 'Get project information.' },
           { name: 'get_settings', description: 'Get project settings, optionally for one category.', properties: ['category'] },
-          { name: 'refresh_assets', description: 'Refresh the asset database after external file changes.', properties: ['folder'], example: { action: 'refresh_assets', folder: 'db://assets/scripts/core' } },
         ],
       ),
       this.createTool(
-        'project_build_system',
-        'Inspect or trigger Cocos build workflows. Supported actions are only build, get_build_settings, open_build_panel, and check_builder_status; there is no get_config action. get_build_settings reports builder readiness and MCP limitations, not the complete per-platform configuration. Builds open the Editor Build panel for manual configuration. Example: {"action":"build","platform":"web-mobile","debug":true}. Actions: build, get_build_settings, open_build_panel, check_builder_status.',
-        ['build', 'get_build_settings', 'open_build_panel', 'check_builder_status'],
+        'project_build',
+        'Inspect or trigger Cocos build workflows. Supported actions are only build, get_build_settings, open_build_panel, and check_builder_status; there is no get_config action. get_build_settings reports builder readiness and MCP limitations, not the complete per-platform configuration. Builds open the Editor Build panel for manual configuration. Example: {"action":"build","platform":"web-mobile","debug":true}. Actions: build, get_settings, open_panel, check_status.',
+        ['build', 'get_settings', 'open_panel', 'check_status'],
         ['platform', 'debug'],
-        args => this.routeLegacyAction('project_build_system', {
+        args => this.routeLegacyAction('project_build', {
           build: 'project_build_project',
-          get_build_settings: 'project_get_build_settings',
-          open_build_panel: 'project_open_build_panel',
-          check_builder_status: 'project_check_builder_status',
+          get_settings: 'project_get_build_settings',
+          open_panel: 'project_open_build_panel',
+          check_status: 'project_check_builder_status',
         }, args),
         {},
         [
           { name: 'build', description: 'Open the Build panel for a platform.', properties: ['platform', 'debug'], required: ['platform'], example: { action: 'build', platform: 'web-mobile', debug: true } },
-          { name: 'get_build_settings', description: 'Report builder readiness and MCP limitations.' },
-          { name: 'open_build_panel', description: 'Open Creator’s Build panel.' },
-          { name: 'check_builder_status', description: 'Check whether the Builder service is ready.' },
+          { name: 'get_settings', description: 'Report builder readiness and MCP limitations.' },
+          { name: 'open_panel', description: 'Open Creator’s Build panel.' },
+          { name: 'check_status', description: 'Check whether the Builder service is ready.' },
         ],
       ),
       this.createTool(
@@ -900,56 +840,6 @@ export class UnifiedTools {
         {},
         [
           { name: 'run', description: 'Open the Build panel to run or preview a platform.', properties: ['platform'], example: { action: 'run', platform: 'web-mobile' } },
-        ],
-      ),
-      this.createTool(
-        'project_asset_system',
-        'Project asset CRUD wrapper. Prefer asset_manage/asset_query for new code; distinguish asset URL from filesystem path. Actions: import, create, copy, move, delete, save, reimport.',
-        ['import', 'create', 'copy', 'move', 'delete', 'save', 'reimport'],
-        ['sourcePath', 'targetFolder', 'url', 'content', 'overwrite', 'source', 'target'],
-        args => this.routeLegacyAction('project_asset_system', {
-          import: 'project_import_asset',
-          create: 'project_create_asset',
-          copy: 'project_copy_asset',
-          move: 'project_move_asset',
-          delete: 'project_delete_asset',
-          save: 'project_save_asset',
-          reimport: 'project_reimport_asset',
-        }, args),
-        {},
-        [
-          { name: 'import', description: 'Import a filesystem asset into a project folder. Existing target files are replaced by default; set overwrite=false to reject collisions.', properties: ['sourcePath', 'targetFolder', 'overwrite'], required: ['sourcePath', 'targetFolder'] },
-          { name: 'create', description: 'Create an asset at an asset URL.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
-          { name: 'copy', description: 'Copy an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
-          { name: 'move', description: 'Move an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
-          { name: 'delete', description: 'Delete an asset by URL.', properties: ['url'], required: ['url'] },
-          { name: 'save', description: 'Save text content to an asset URL.', properties: ['url', 'content'], required: ['url', 'content'] },
-          { name: 'reimport', description: 'Reimport an asset by URL.', properties: ['url'], required: ['url'] },
-        ],
-      ),
-      this.createTool(
-        'project_query',
-        'Project asset query wrapper for assets, details, paths, UUIDs, and URLs. Prefer exact URL/UUID over names. Actions: assets, asset_info, asset_details, asset_path, asset_uuid, asset_url, find_asset_by_name.',
-        ['assets', 'asset_info', 'asset_details', 'asset_path', 'asset_uuid', 'asset_url', 'find_asset_by_name'],
-        ['type', 'folder', 'assetPath', 'includeSubAssets', 'url', 'uuid', 'urlOrUUID', 'name', 'exactMatch', 'assetType', 'maxResults'],
-        args => this.routeLegacyAction('project_query', {
-          assets: 'project_get_assets',
-          asset_info: 'project_get_asset_info',
-          asset_details: 'project_get_asset_details',
-          asset_path: 'project_query_asset_path',
-          asset_uuid: 'project_query_asset_uuid',
-          asset_url: 'project_query_asset_url',
-          find_asset_by_name: 'project_find_asset_by_name',
-        }, args),
-        {},
-        [
-          { name: 'assets', description: 'List assets, optionally filtered by type or folder.', properties: ['type', 'folder'] },
-          { name: 'asset_info', description: 'Get asset information by asset path.', properties: ['assetPath'], required: ['assetPath'], example: { action: 'asset_info', assetPath: 'db://assets/player.prefab' } },
-          { name: 'asset_details', description: 'Get detailed asset information by asset URL or UUID.', properties: ['urlOrUUID', 'includeSubAssets'], required: ['urlOrUUID'] },
-          { name: 'asset_path', description: 'Convert an asset URL to a filesystem path.', properties: ['url'], required: ['url'] },
-          { name: 'asset_uuid', description: 'Get an asset UUID from an asset URL.', properties: ['url'], required: ['url'] },
-          { name: 'asset_url', description: 'Get an asset URL from a UUID.', properties: ['uuid'], required: ['uuid'] },
-          { name: 'find_asset_by_name', description: 'Find assets by name.', properties: ['name', 'assetType', 'maxResults'], required: ['name'], example: { action: 'find_asset_by_name', name: 'player', assetType: 'cc.Prefab' } },
         ],
       ),
       this.createTool(
@@ -969,175 +859,156 @@ export class UnifiedTools {
       ),
       this.createTool(
         'debug_logs',
-        'Read and search Cocos project/editor log files. Use targeted search patterns to reduce returned log volume. Actions: get_project_logs, get_log_file_info, search.',
-        ['get_project_logs', 'get_log_file_info', 'search'],
+        'Read and search Cocos project/editor log files. Use targeted search patterns to reduce returned log volume. Actions: get, get_file_info, search.',
+        ['get', 'get_file_info', 'search'],
         ['lines', 'filterKeyword', 'logLevel', 'pattern', 'maxResults', 'contextLines'],
         args => this.routeLegacyAction('debug_logs', {
-          get_project_logs: 'debug_get_project_logs',
-          get_log_file_info: 'debug_get_log_file_info',
+          get: 'debug_get_project_logs',
+          get_file_info: 'debug_get_log_file_info',
           search: 'debug_search_project_logs',
         }, args),
         {},
         [
-          { name: 'get_project_logs', description: 'Read recent project log lines.', properties: ['lines', 'filterKeyword', 'logLevel'] },
-          { name: 'get_log_file_info', description: 'Get project log-file information.' },
+          { name: 'get', description: 'Read recent project log lines.', properties: ['lines', 'filterKeyword', 'logLevel'] },
+          { name: 'get_file_info', description: 'Get project log-file information.' },
           { name: 'search', description: 'Search project logs by pattern.', properties: ['pattern', 'maxResults', 'contextLines'], required: ['pattern'] },
         ],
       ),
       this.createTool(
-        'debug_execute',
-        'Legacy compatibility endpoint. Arbitrary JavaScript execution is not supported; script returns a failure with guidance to use dedicated tools or a registered scene script method. Actions: script.',
-        ['script'],
-        ['script'],
-        args => this.routeLegacyAction('debug_execute', {
-          script: 'debug_execute_script',
-        }, args),
-        {},
-        [
-          { name: 'script', description: 'Legacy endpoint that always rejects arbitrary JavaScript.', properties: ['script'], required: ['script'], status: 'unsupported', unsupportedReason: 'Arbitrary JavaScript execution is not supported. Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or a registered scene method.' },
-        ],
-      ),
-      this.createTool(
         'debug_scene',
-        'Debug scene tree, performance-oriented validation, and editor info. Use node_tree for hierarchy reads; validate does not replace missing asset checks. Actions: node_tree, validate, editor_info.',
-        ['node_tree', 'validate', 'editor_info'],
-        ['rootUuid', 'maxDepth', 'checkPerformance'],
+        'Validate scene performance and query editor environment information. Asset reference validation belongs to asset_analyze. Actions: validate, get_editor_info.',
+        ['validate', 'get_editor_info'],
+        ['checkPerformance'],
         args => this.routeLegacyAction('debug_scene', {
-          node_tree: 'debug_get_node_tree',
           validate: 'debug_validate_scene',
-          editor_info: 'debug_get_editor_info',
+          get_editor_info: 'debug_get_editor_info',
         }, args),
         {},
         [
-          { name: 'node_tree', description: 'Get a detailed scene node tree.', properties: ['rootUuid', 'maxDepth'] },
-          { name: 'validate', description: 'Validate the current scene.', properties: ['checkMissingAssets', 'checkPerformance'] },
-          { name: 'editor_info', description: 'Get editor and environment information.' },
+          { name: 'validate', description: 'Validate current scene performance.', properties: ['checkPerformance'] },
+          { name: 'get_editor_info', description: 'Get editor and environment information.' },
         ],
       ),
       this.createTool(
         'debug_performance',
-        'Get editor/game performance stats for diagnosis. The only action is `stats` (not `get_stats`). In edit mode it may return `{ available: false, reason, recommendedCollectionMethod }` because Cocos does not expose runtime counters there. Actions: stats.',
-        ['stats'],
+        'Get editor/game performance stats for diagnosis. The only action is `get_stats`. In edit mode it may return `{ available: false, reason, recommendedCollectionMethod }` because Cocos does not expose runtime counters there. Actions: get_stats.',
+        ['get_stats'],
         [],
         args => this.routeLegacyAction('debug_performance', {
-          stats: 'debug_get_performance_stats',
+          get_stats: 'debug_get_performance_stats',
         }, args),
         {},
         [
-          { name: 'stats', description: 'Get available editor/game performance statistics.' },
+          { name: 'get_stats', description: 'Get available editor/game performance statistics.' },
         ],
       ),
       this.createTool(
-        'preferences_manage',
-        'Open, query, set, reset, export, or import editor preferences. Query current values before set/reset. Actions: open, query, set, get_all, reset, export, import.',
-        ['open', 'query', 'set', 'get_all', 'reset', 'export', 'import'],
-        ['tab', 'args', 'name', 'path', 'value', 'type', 'exportPath', 'importPath'],
-        args => this.routeLegacyAction('preferences_manage', {
+        'preferences',
+        'Open, get, set, list, reset, or export editor preferences. Read current values before set/reset. Actions: open, get, set, list, reset, export.',
+        ['open', 'get', 'set', 'list', 'reset', 'export'],
+        ['tab', 'args', 'name', 'path', 'value', 'type', 'exportPath'],
+        args => this.routeLegacyAction('preferences', {
           open: 'preferences_open_preferences_settings',
-          query: 'preferences_query_preferences_config',
+          get: 'preferences_query_preferences_config',
           set: 'preferences_set_preferences_config',
-          get_all: 'preferences_get_all_preferences',
+          list: 'preferences_get_all_preferences',
           reset: 'preferences_reset_preferences',
           export: 'preferences_export_preferences',
-          import: 'preferences_import_preferences',
         }, args),
         {},
         [
           { name: 'open', description: 'Open the preferences settings panel.', properties: ['tab', 'args'] },
-          { name: 'query', description: 'Query one preferences configuration value.', properties: ['name', 'path', 'type'], required: ['name'] },
+          { name: 'get', description: 'Query one preferences configuration value.', properties: ['name', 'path', 'type'], required: ['name'] },
           { name: 'set', description: 'Set one preferences configuration value.', properties: ['name', 'path', 'value', 'type'], required: ['name', 'path', 'value'] },
-          { name: 'get_all', description: 'Get all available preference categories.' },
+          { name: 'list', description: 'Get all available preference categories.' },
           { name: 'reset', description: 'Reset a preference category or all preferences.', properties: ['name', 'type'] },
           { name: 'export', description: 'Export preferences to a file.', properties: ['exportPath'] },
-          { name: 'import', description: 'Import preferences from a file.', properties: ['importPath'], required: ['importPath'], status: 'unsupported', unsupportedReason: 'Cocos Creator 3.8 does not expose safe preference import through the current extension IPC. Import preferences manually in the Editor.' },
         ],
       ),
       this.createTool(
-        'server_info',
-        'Query MCP server address, port, and status metadata. Actions: ip_list, sorted_ip_list, port, status.',
-        ['ip_list', 'sorted_ip_list', 'port', 'status'],
+        'server_status',
+        'Query MCP server address, port, and status metadata. Actions: list_ips, get_port, get_status.',
+        ['list_ips', 'get_port', 'get_status'],
         [],
-        args => this.routeLegacyAction('server_info', {
-          ip_list: 'server_query_server_ip_list',
-          sorted_ip_list: 'server_query_sorted_server_ip_list',
-          port: 'server_query_server_port',
-          status: 'server_get_server_status',
+        args => this.routeLegacyAction('server_status', {
+          list_ips: 'server_query_server_ip_list',
+          get_port: 'server_query_server_port',
+          get_status: 'server_get_server_status',
         }, args),
         {},
         [
-          { name: 'ip_list', description: 'List server IP addresses.' },
-          { name: 'sorted_ip_list', description: 'List server IP addresses in sorted order.' },
-          { name: 'port', description: 'Get the editor server port.' },
-          { name: 'status', description: 'Get server status metadata.' },
+          { name: 'list_ips', description: 'List server IP addresses.' },
+          { name: 'get_port', description: 'Get the editor server port.' },
+          { name: 'get_status', description: 'Get server status metadata.' },
         ],
       ),
       this.createTool(
         'server_network',
-        'Check local network interfaces and MCP connectivity. Use when clients cannot connect. Actions: connectivity, interfaces.',
-        ['connectivity', 'interfaces'],
+        'Check local network interfaces and MCP connectivity. Use when clients cannot connect. Actions: check_connectivity, list_interfaces.',
+        ['check_connectivity', 'list_interfaces'],
         ['timeout'],
         args => this.routeLegacyAction('server_network', {
-          connectivity: 'server_check_server_connectivity',
-          interfaces: 'server_get_network_interfaces',
+          check_connectivity: 'server_check_server_connectivity',
+          list_interfaces: 'server_get_network_interfaces',
         }, args),
         {},
         [
-          { name: 'connectivity', description: 'Check MCP server connectivity.', properties: ['timeout'] },
-          { name: 'interfaces', description: 'List local network interfaces.' },
+          { name: 'check_connectivity', description: 'Check MCP server connectivity.', properties: ['timeout'] },
+          { name: 'list_interfaces', description: 'List local network interfaces.' },
         ],
       ),
       this.createTool(
         'server_control',
-        'Query MCP server health, settings, and currently available tools. Use available_tools to see active filtered tool set. Actions: health, settings, available_tools.',
-        ['health', 'settings', 'available_tools'],
+        'Query MCP server health, settings, and currently available tools. Use list_available_tools to see the active filtered tool set. Actions: get_health, get_settings, list_available_tools.',
+        ['get_health', 'get_settings', 'list_available_tools'],
         [],
         args => this.handleServerControl(args),
         {},
         [
-          { name: 'health', description: 'Get MCP server health.' },
-          { name: 'settings', description: 'Get active MCP server settings.' },
-          { name: 'available_tools', description: 'List tools currently available through this MCP server.' },
+          { name: 'get_health', description: 'Get MCP server health.' },
+          { name: 'get_settings', description: 'Get active MCP server settings.' },
+          { name: 'list_available_tools', description: 'List tools currently available through this MCP server.' },
         ],
       ),
       this.createTool(
-        'broadcast_message',
-        'Inspect and manage Cocos editor broadcast listeners/logs. Stop listeners when no longer needed. Actions: get_log, listen, stop_listening, clear_log, active_listeners.',
-        ['get_log', 'listen', 'stop_listening', 'clear_log', 'active_listeners'],
+        'broadcast',
+        'Inspect and manage Cocos editor broadcast listeners/logs. Stop listeners when no longer needed. Actions: get_log, listen, stop, clear_log, list_active_listeners.',
+        ['get_log', 'listen', 'stop', 'clear_log', 'list_active_listeners'],
         ['limit', 'messageType'],
-        args => this.routeLegacyAction('broadcast_message', {
+        args => this.routeLegacyAction('broadcast', {
           get_log: 'broadcast_get_broadcast_log',
           listen: 'broadcast_listen_broadcast',
-          stop_listening: 'broadcast_stop_listening',
+          stop: 'broadcast_stop_listening',
           clear_log: 'broadcast_clear_broadcast_log',
-          active_listeners: 'broadcast_get_active_listeners',
+          list_active_listeners: 'broadcast_get_active_listeners',
         }, args),
         {},
         [
           { name: 'get_log', description: 'Read captured broadcast messages.', properties: ['limit', 'messageType'] },
           { name: 'listen', description: 'Start listening for a broadcast message type.', properties: ['messageType'], required: ['messageType'] },
-          { name: 'stop_listening', description: 'Stop listening for a broadcast message type.', properties: ['messageType'], required: ['messageType'] },
+          { name: 'stop', description: 'Stop listening for a broadcast message type.', properties: ['messageType'], required: ['messageType'] },
           { name: 'clear_log', description: 'Clear captured broadcast messages.' },
-          { name: 'active_listeners', description: 'List active broadcast listeners.' },
+          { name: 'list_active_listeners', description: 'List active broadcast listeners.' },
         ],
       ),
       this.createTool(
-        'reference_image_manage',
-        'Manage scene reference images. Query current/config before modifying position, scale, opacity, or active image. Actions: add, remove, switch, set_data, query_config, query_current, refresh, set_position, set_scale, set_opacity, list, clear_all.',
-        ['add', 'remove', 'switch', 'set_data', 'query_config', 'query_current', 'refresh', 'set_position', 'set_scale', 'set_opacity', 'list', 'clear_all'],
+        'reference_image',
+        'Manage scene reference images. Query current/config before modifying position, scale, opacity, or active image. Actions: add, remove, switch, set_data, get_config, get_current, refresh, set_position, set_scale, set_opacity, list, clear.',
+        ['add', 'remove', 'switch', 'set_data', 'get_config', 'get_current', 'refresh', 'set_position', 'set_scale', 'set_opacity', 'list', 'clear'],
         ['paths', 'path', 'sceneUUID', 'key', 'value', 'x', 'y', 'sx', 'sy', 'opacity'],
-        args => this.routeLegacyAction('reference_image_manage', {
+        args => this.routeLegacyAction('reference_image', {
           add: 'referenceImage_add_reference_image',
           remove: 'referenceImage_remove_reference_image',
           switch: 'referenceImage_switch_reference_image',
           set_data: 'referenceImage_set_reference_image_data',
-          query_config: 'referenceImage_query_reference_image_config',
-          query_current: 'referenceImage_query_current_reference_image',
+          get_config: 'referenceImage_query_reference_image_config',
+          get_current: 'referenceImage_query_current_reference_image',
           refresh: 'referenceImage_refresh_reference_image',
           set_position: 'referenceImage_set_reference_image_position',
           set_scale: 'referenceImage_set_reference_image_scale',
           set_opacity: 'referenceImage_set_reference_image_opacity',
           list: 'referenceImage_list_reference_images',
-          clear_all: 'referenceImage_clear_all_reference_images',
+          clear: 'referenceImage_clear_all_reference_images',
         }, args),
         {},
         [
@@ -1145,61 +1016,57 @@ export class UnifiedTools {
           { name: 'remove', description: 'Remove reference images, or the current image when paths is omitted.', properties: ['paths'] },
           { name: 'switch', description: 'Switch to a reference image.', properties: ['path', 'sceneUUID'], required: ['path'] },
           { name: 'set_data', description: 'Set one reference-image data property.', properties: ['key', 'value'], required: ['key', 'value'] },
-          { name: 'query_config', description: 'Get reference-image configuration.' },
-          { name: 'query_current', description: 'Get the current reference image.' },
+          { name: 'get_config', description: 'Get reference-image configuration.' },
+          { name: 'get_current', description: 'Get the current reference image.' },
           { name: 'refresh', description: 'Refresh reference-image display.' },
           { name: 'set_position', description: 'Set reference-image position.', properties: ['x', 'y'], required: ['x', 'y'] },
           { name: 'set_scale', description: 'Set reference-image scale.', properties: ['sx', 'sy'], required: ['sx', 'sy'] },
           { name: 'set_opacity', description: 'Set reference-image opacity.', properties: ['opacity'], required: ['opacity'] },
           { name: 'list', description: 'List reference images.' },
-          { name: 'clear_all', description: 'Clear all reference images.' },
+          { name: 'clear', description: 'Clear all reference images.' },
         ],
       ),
       this.createTool(
         'validation_params',
-        'Validate or format MCP parameters before risky calls. Useful when generating JSON arguments programmatically. Actions: validate_json, safe_string, format_mcp_request.',
-        ['validate_json', 'safe_string', 'format_mcp_request'],
+        'Validate or format MCP parameters before risky calls. Useful when generating JSON arguments programmatically. Actions: validate_json, sanitize_string, format_request.',
+        ['validate_json', 'sanitize_string', 'format_request'],
         ['jsonString', 'expectedSchema', 'value', 'toolName', 'arguments'],
         args => this.routeLegacyAction('validation_params', {
           validate_json: 'validation_validate_json_params',
-          safe_string: 'validation_safe_string_value',
-          format_mcp_request: 'validation_format_mcp_request',
+          sanitize_string: 'validation_safe_string_value',
+          format_request: 'validation_format_mcp_request',
         }, args),
         {},
         [
           { name: 'validate_json', description: 'Validate and repair JSON parameters.', properties: ['jsonString', 'expectedSchema'], required: ['jsonString'] },
-          { name: 'safe_string', description: 'Create a JSON-safe string value.', properties: ['value'], required: ['value'] },
-          { name: 'format_mcp_request', description: 'Format a complete MCP request.', properties: ['toolName', 'arguments'], required: ['toolName', 'arguments'] },
+          { name: 'sanitize_string', description: 'Create a JSON-safe string value.', properties: ['value'], required: ['value'] },
+          { name: 'format_request', description: 'Format a complete MCP request.', properties: ['toolName', 'arguments'], required: ['toolName', 'arguments'] },
         ],
       ),
       this.createTool(
-        'resource_reference',
-        'Cross-reference assets and scene nodes. Query asset UUID/URL first, then inspect dependent nodes or asset dependencies. Actions: nodes_by_asset_uuid, asset_dependencies, validate_asset_references.',
-        ['nodes_by_asset_uuid', 'asset_dependencies', 'validate_asset_references'],
-        ['assetUuid', 'urlOrUUID', 'direction', 'directory'],
-        args => this.routeLegacyAction('resource_reference', {
+        'asset_reference',
+        'Cross-reference assets and scene nodes. Query the asset UUID first, then find dependent scene nodes. Actions: nodes_by_asset_uuid.',
+        ['nodes_by_asset_uuid'],
+        ['assetUuid'],
+        args => this.routeLegacyAction('asset_reference', {
           nodes_by_asset_uuid: 'sceneAdvanced_query_nodes_by_asset_uuid',
-          asset_dependencies: 'assetAdvanced_get_asset_dependencies',
-          validate_asset_references: 'assetAdvanced_validate_asset_references',
         }, args),
         {},
         [
           { name: 'nodes_by_asset_uuid', description: 'Find scene nodes that reference an asset.', properties: ['assetUuid'], required: ['assetUuid'] },
-          { name: 'asset_dependencies', description: 'Get asset dependencies or dependents.', properties: ['urlOrUUID', 'direction'], required: ['urlOrUUID'], status: 'unsupported', unsupportedReason: 'Cocos Creator 3.8 does not expose the required dependency-analysis IPC. Use Creator’s asset dependency UI.' },
-          { name: 'validate_asset_references', description: 'Validate asset references, optionally under a directory.', properties: ['directory'] },
         ],
       ),
       this.createTool(
         'tool_registry',
-        'Inspect available MCP tools and action names when uncertain. Use describe before guessing parameters. Actions: list, describe, actions.',
-        ['list', 'describe', 'actions'],
+        'Inspect available MCP tools and action names when uncertain. Use describe before guessing parameters. Actions: list, describe, list_actions.',
+        ['list', 'describe', 'list_actions'],
         ['toolName'],
         args => this.handleToolRegistry(args),
         {},
         [
           { name: 'list', description: 'List public MCP tools.' },
           { name: 'describe', description: 'Get an action-specific contract for one tool.', properties: ['toolName'], required: ['toolName'], example: { action: 'describe', toolName: 'node_lifecycle' } },
-          { name: 'actions', description: 'List action names and statuses for all tools.' },
+          { name: 'list_actions', description: 'List action names and statuses for all tools.' },
         ],
       ),
     ]
@@ -1338,7 +1205,7 @@ export class UnifiedTools {
     const action = args?.action
     if (typeof action !== 'string' || !action) {
       return toolFailure(`${toolName} requires an action parameter`, {
-        instruction: `Call tool_registry.actions or inspect tools/list, then retry with one of: ${Object.keys(actionMap).join(', ')}`,
+        instruction: `Call tool_registry.list_actions or inspect tools/list, then retry with one of: ${Object.keys(actionMap).join(', ')}`,
       })
     }
 
@@ -1387,7 +1254,7 @@ export class UnifiedTools {
     const attempted = { action, ...args }
 
     if (lowerError.includes('not found') && (toolName.startsWith('component') || lowerError.includes('component'))) {
-      return { category: 'component', retryable: true, nextTool: 'component_query', nextAction: 'get_components', retryWith: { nodeUuid: args.nodeUuid }, attempted }
+      return { category: 'component', retryable: true, nextTool: 'component_query', nextAction: 'list', retryWith: { nodeUuid: args.nodeUuid }, attempted }
     }
     if (lowerError.includes('node') && (lowerError.includes('not found') || lowerError.includes('failed'))) {
       return { category: 'target', retryable: true, nextTool: 'node_query', nextAction: 'get_info', retryWith: { uuid: args.nodeUuid ?? args.uuid }, attempted }
@@ -1404,12 +1271,8 @@ export class UnifiedTools {
   private getFailureInstruction(toolName: string, action: string, error: string, args: ToolArguments): string | undefined {
     const lowerError = error.toLowerCase()
 
-    if (toolName === 'scene_execution_control' && action === 'execute_scene_script') {
+    if (toolName === 'scene_execution' && action === 'execute_scene_script') {
       return 'execute_scene_script cannot run arbitrary JavaScript. Use name="cocos-mcp-server" with a method exported by source/scene.ts, call a dedicated MCP tool, or add and register a new scene method in the extension before calling it.'
-    }
-
-    if (toolName === 'debug_execute') {
-      return 'Arbitrary Editor or scene JavaScript execution is not supported. Use asset_query/project_query for asset database reads, debug_console/debug_logs for diagnostics, or scene_execution_control.execute_scene_script for an already registered scene method.'
     }
 
     if (lowerError.includes('requires') && lowerError.includes('uuid')) {
@@ -1422,16 +1285,16 @@ export class UnifiedTools {
 
     if (toolName.startsWith('component') || lowerError.includes('component')) {
       if (lowerError.includes('not found') || lowerError.includes('type') || lowerError.includes('cid') || lowerError.includes('verify')) {
-        return 'Call component_query.get_components with the nodeUuid, then retry using the returned component instance uuid, type, or cid. Prefer uuid for removal; use component_available.list only when adding a new component.'
+        return 'Call component_query.list with the nodeUuid, then retry using the returned component instance uuid, type, or cid. Prefer uuid for removal; use component_catalog.list only when adding a new component.'
       }
-      return 'Call component_query.get_components first to confirm the nodeUuid, component instance uuid/type/cid, and property names before retrying.'
+      return 'Call component_query.list first to confirm the nodeUuid, component instance uuid/type/cid, and property names before retrying.'
     }
 
     if (toolName.startsWith('prefab') || lowerError.includes('prefab') || lowerError.includes('预制体')) {
       if (action === 'update' || action === 'revert') {
         return 'Call node_query.get_info for the prefab instance nodeUuid. Use prefab_edit.update to apply overrides to the asset, or prefab_edit.revert to discard instance overrides.'
       }
-      return 'Use prefab_browse.list/info or asset_query.find_by_name to confirm the prefabPath or assetUuid, then retry with the exact prefab identity.'
+      return 'Use prefab_query.list/info or asset_query.find_by_name to confirm the prefabPath or assetUuid, then retry with the exact prefab identity.'
     }
 
     if (toolName.startsWith('asset') || toolName.startsWith('project_asset') || toolName.startsWith('project_query') || lowerError.includes('asset')) {
@@ -1443,7 +1306,7 @@ export class UnifiedTools {
     }
 
     if (toolName.startsWith('scene')) {
-      return 'Query scene readiness and hierarchy first with scene_execution_control.query_ready and scene_hierarchy.get, then retry the scene operation.'
+      return 'Query scene readiness and hierarchy first with scene_query.check_ready and scene_hierarchy.get_tree, then retry the scene operation.'
     }
 
     if (toolName.startsWith('node')) {
@@ -1476,7 +1339,7 @@ export class UnifiedTools {
 
   private async handleServerControl(args: ToolArguments): Promise<ToolResponse> {
     switch (args.action) {
-      case 'health':
+      case 'get_health':
         return {
           success: true,
           data: {
@@ -1486,12 +1349,12 @@ export class UnifiedTools {
             settings: this.infoProvider.getSettings ? this.infoProvider.getSettings() : null,
           },
         }
-      case 'settings':
+      case 'get_settings':
         return {
           success: true,
           data: this.infoProvider.getSettings ? this.infoProvider.getSettings() : null,
         }
-      case 'available_tools':
+      case 'list_available_tools':
         return {
           success: true,
           data: {
@@ -1505,15 +1368,15 @@ export class UnifiedTools {
       default:
         return {
           success: false,
-          error: `Unsupported action '${args.action}' for server_control. Available actions: health, settings, available_tools`,
-          instruction: 'Retry server_control with action set to one of: health, settings, available_tools.',
+          error: `Unsupported action '${args.action}' for server_control. Available actions: get_health, get_settings, list_available_tools`,
+          instruction: 'Retry server_control with action set to one of: get_health, get_settings, list_available_tools.',
         }
     }
   }
 
   private async handleToolRegistry(args: ToolArguments): Promise<ToolResponse> {
     const tools = this.tools
-    const publicTools = tools.filter(tool => !LEGACY_PUBLIC_TOOL_NAMES.has(tool.name))
+    const publicTools = tools
     switch (args.action) {
       case 'list':
         return {
@@ -1554,7 +1417,7 @@ export class UnifiedTools {
           },
         }
       }
-      case 'actions':
+      case 'list_actions':
         return {
           success: true,
           data: publicTools.map(tool => ({
@@ -1568,8 +1431,8 @@ export class UnifiedTools {
       default:
         return {
           success: false,
-          error: `Unsupported action '${args.action}' for tool_registry. Available actions: list, describe, actions`,
-          instruction: 'Retry tool_registry with action set to one of: list, describe, actions.',
+          error: `Unsupported action '${args.action}' for tool_registry. Available actions: list, describe, list_actions`,
+          instruction: 'Retry tool_registry with action set to one of: list, describe, list_actions.',
         }
     }
   }
@@ -1581,7 +1444,7 @@ export class UnifiedTools {
     if (!nodeUuid) {
       return {
         success: false,
-        error: 'component_event_binding requires nodeUuid',
+        error: 'component_event requires nodeUuid',
         instruction: 'Call node_query or scene_hierarchy to find the Button node UUID, then retry with nodeUuid.',
       }
     }
@@ -1592,7 +1455,7 @@ export class UnifiedTools {
         return {
           success: false,
           error: `Component ${componentType} not found on node ${nodeUuid}`,
-          instruction: 'Call component_query.get_components with this nodeUuid to confirm the Button componentType/cid, then retry.',
+          instruction: 'Call component_query.list with this nodeUuid to confirm the Button componentType/cid, then retry.',
         }
       }
 
@@ -1600,7 +1463,7 @@ export class UnifiedTools {
       const currentEvents = getButtonEvents(componentInfo.component, fieldName)
 
       switch (args.action) {
-        case 'get_button_events':
+        case 'list':
           return {
             success: true,
             data: {
@@ -1611,7 +1474,7 @@ export class UnifiedTools {
               count: currentEvents.length,
             },
           }
-        case 'clear_button_events':
+        case 'clear':
           await this.setRawComponentProperty(nodeUuid, componentInfo.index, fieldName, [])
           return {
             success: true,
@@ -1622,7 +1485,7 @@ export class UnifiedTools {
               count: 0,
             },
           }
-        case 'set_button_events': {
+        case 'set': {
           const events = Array.isArray(args.events) ? args.events : []
           await this.setRawComponentProperty(nodeUuid, componentInfo.index, fieldName, events)
           return {
@@ -1636,7 +1499,7 @@ export class UnifiedTools {
             },
           }
         }
-        case 'append_button_event': {
+        case 'append': {
           const nextEvents = [
             ...currentEvents,
             buildButtonClickEvent(args),
@@ -1656,8 +1519,8 @@ export class UnifiedTools {
         default:
           return {
             success: false,
-            error: `Unsupported action '${args.action}' for component_event_binding. Available actions: get_button_events, clear_button_events, set_button_events, append_button_event`,
-            instruction: 'Retry component_event_binding with action set to one of: get_button_events, clear_button_events, set_button_events, append_button_event.',
+            error: `Unsupported action '${args.action}' for component_event. Available actions: list, clear, set, append`,
+            instruction: 'Retry component_event with action set to one of: list, clear, set, append.',
           }
       }
     }

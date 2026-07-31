@@ -1,5 +1,8 @@
 import type { JsonSchema, ToolExecutor } from '../types'
 import type { LegacyExecutorOverrides, LegacyPrefix } from './unified-tools'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import path from 'node:path'
+import ts from 'typescript'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UnifiedTools } from './unified-tools'
 
@@ -18,6 +21,15 @@ function getActionSchema(toolSchema: JsonSchema, action: string): JsonSchema | u
   return toolSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === action)
 }
 
+function listTypeScriptFiles(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const filePath = path.join(directory, entry)
+    return statSync(filePath).isDirectory()
+      ? listTypeScriptFiles(filePath)
+      : filePath.endsWith('.ts') ? [filePath] : []
+  })
+}
+
 describe('unified tools', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -26,11 +38,11 @@ describe('unified tools', () => {
   it('rejects non-object tool arguments before routing', async () => {
     const tools = new UnifiedTools()
 
-    await expect(tools.execute('scene_management', null)).resolves.toMatchObject({
+    await expect(tools.execute('scene_lifecycle', null)).resolves.toMatchObject({
       success: false,
       errorCode: 'TOOL_CONTRACT_ERROR',
-      error: 'Tool scene_management requires an object argument',
-      data: { toolName: 'scene_management', attempted: null, allowedProperties: ['action'] },
+      error: 'Tool scene_lifecycle requires an object argument',
+      data: { toolName: 'scene_lifecycle', attempted: null, allowedProperties: ['action'] },
       metadata: { category: 'contract', allowed: ['action'] },
     })
   })
@@ -38,20 +50,21 @@ describe('unified tools', () => {
   it('rejects a missing action without calling a legacy tool', async () => {
     const tools = new UnifiedTools()
 
-    await expect(tools.execute('scene_management', {})).resolves.toMatchObject({
+    await expect(tools.execute('scene_lifecycle', {})).resolves.toMatchObject({
       success: false,
-      error: 'scene_management requires an action parameter',
+      error: 'scene_lifecycle requires an action parameter',
+      instruction: expect.stringContaining('tool_registry.describe'),
     })
   })
 
   it('exposes registered tools through the registry action', async () => {
     const tools = new UnifiedTools()
 
-    const result = await tools.execute('tool_registry', { action: 'describe', toolName: 'scene_management' })
+    const result = await tools.execute('tool_registry', { action: 'describe', toolName: 'scene_lifecycle' })
 
     expect(result).toMatchObject({ success: true })
     expect(result.data).toMatchObject({
-      name: 'scene_management',
+      name: 'scene_lifecycle',
       inputSchema: {
         required: ['action'],
       },
@@ -68,7 +81,7 @@ describe('unified tools', () => {
 
   it('generates action-specific schemas for ActionSpec tools', () => {
     const tools = new UnifiedTools()
-    const sceneManagement = tools.getTools().find(tool => tool.name === 'scene_management')
+    const sceneManagement = tools.getTools().find(tool => tool.name === 'scene_lifecycle')
     const schemas = sceneManagement?.inputSchema.oneOf ?? []
     const openSchema = schemas.find(schema => schema.properties?.action?.enum?.[0] === 'open')
     const saveSchema = schemas.find(schema => schema.properties?.action?.enum?.[0] === 'save')
@@ -91,37 +104,40 @@ describe('unified tools', () => {
     const componentQuery = tools.getTools().find(tool => tool.name === 'component_query')
     const assetQuery = tools.getTools().find(tool => tool.name === 'asset_query')
 
-    const nodeInfo = nodeQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get_info')
-    const componentInfo = componentQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get_info')
-    const assetUrl = assetQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'query_url')
+    const nodeInfo = nodeQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get')
+    const componentInfo = componentQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get')
+    const assetIdentity = assetQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'resolve_identity')
 
     expect(nodeInfo).toMatchObject({ required: ['action', 'uuid'], additionalProperties: false })
     expect(componentInfo).toMatchObject({ required: ['action', 'nodeUuid', 'componentType'], additionalProperties: false })
-    expect(assetUrl).toMatchObject({ required: ['action', 'uuid'], additionalProperties: false })
+    expect(assetIdentity).toMatchObject({ required: ['action', 'urlOrUUID'], additionalProperties: false })
   })
 
   it('generates action-specific schemas for asset and prefab tools', () => {
     const tools = new UnifiedTools()
     const assetQuery = tools.getTools().find(tool => tool.name === 'asset_query')
-    const assetManage = tools.getTools().find(tool => tool.name === 'asset_manage')
+    const assetManage = tools.getTools().find(tool => tool.name === 'asset_lifecycle')
     const prefabInstance = tools.getTools().find(tool => tool.name === 'prefab_instance')
 
-    const queryUrl = assetQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'query_url')
+    const resolveIdentity = assetQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'resolve_identity')
     const createSpriteFrame = assetManage?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'create_default_spriteframe')
     const instantiate = prefabInstance?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'instantiate')
+    const restore = prefabInstance?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'restore')
 
-    expect(queryUrl).toMatchObject({ required: ['action', 'uuid'], additionalProperties: false })
+    expect(resolveIdentity).toMatchObject({ required: ['action', 'urlOrUUID'], additionalProperties: false })
     expect(createSpriteFrame).toMatchObject({ required: ['action'], additionalProperties: false })
     expect(instantiate).toMatchObject({ required: ['action', 'prefabPath'], additionalProperties: false })
+    expect(restore).toMatchObject({ required: ['action', 'nodeUuid', 'assetUuid'], additionalProperties: false })
+    expect(prefabInstance?.inputSchema.properties?.action?.enum).not.toContain('restore_node')
   })
 
   it('generates action-specific schemas for batch and component event tools', () => {
     const tools = new UnifiedTools()
     const assetBatch = tools.getTools().find(tool => tool.name === 'asset_batch')
-    const eventBinding = tools.getTools().find(tool => tool.name === 'component_event_binding')
+    const eventBinding = tools.getTools().find(tool => tool.name === 'component_event')
 
-    const batchDelete = assetBatch?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'batch_delete')
-    const appendEvent = eventBinding?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'append_button_event')
+    const batchDelete = assetBatch?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'delete')
+    const appendEvent = eventBinding?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'append')
 
     expect(batchDelete).toMatchObject({ required: ['action', 'urls'], additionalProperties: false })
     expect(appendEvent).toMatchObject({ required: ['action', 'nodeUuid', 'targetNodeUuid', 'component', 'handler'], additionalProperties: false })
@@ -129,24 +145,100 @@ describe('unified tools', () => {
 
   it('generates action-specific schemas for scene-control tools', () => {
     const tools = new UnifiedTools()
-    const sceneExecution = tools.getTools().find(tool => tool.name === 'scene_execution_control')
+    const sceneExecution = tools.getTools().find(tool => tool.name === 'scene_execution')
     const sceneView = tools.getTools().find(tool => tool.name === 'scene_view_control')
     const sceneQuery = tools.getTools().find(tool => tool.name === 'scene_query')
+    const sceneHierarchy = tools.getTools().find(tool => tool.name === 'scene_hierarchy')
+    const debugScene = tools.getTools().find(tool => tool.name === 'debug_scene')
 
     const executeMethod = sceneExecution?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'execute_component_method')
-    const changeViewMode = sceneView?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'change_view_mode')
-    const nodesByAsset = sceneQuery?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'nodes_by_asset_uuid')
-
+    const changeViewMode = sceneView?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'set_view_mode')
+    const getTree = sceneHierarchy?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'get_tree')
     expect(executeMethod).toMatchObject({ required: ['action', 'uuid', 'name'], additionalProperties: false })
     expect(changeViewMode).toMatchObject({ required: ['action', 'is2D'], additionalProperties: false })
-    expect(nodesByAsset).toMatchObject({ required: ['action', 'assetUuid'], additionalProperties: false })
+    expect(getTree?.properties).toHaveProperty('rootUuid')
+    expect(getTree?.properties).toHaveProperty('maxDepth')
+    expect(sceneQuery?.inputSchema.properties?.action?.enum).not.toContain('nodes_by_asset_uuid')
+    expect(debugScene?.inputSchema.properties?.action?.enum).not.toContain('get_node_tree')
+  })
+
+  it('enforces normalized public tool and action names', async () => {
+    const tools = new UnifiedTools()
+    const definitions = tools.getTools()
+    const publicNames = definitions.map(tool => tool.name)
+
+    const digitActionExceptions = new Set(['set_icon_gizmo_3d', 'get_icon_gizmo_3d'])
+
+    expect(publicNames).toHaveLength(45)
+    expect(new Set(publicNames).size).toBe(publicNames.length)
+    for (const tool of definitions) {
+      expect(tool.name).toMatch(/^[a-z]+(?:_[a-z]+)*$/)
+      expect(tool.name).not.toMatch(/_(?:manage|management|advanced|available|browse)$/)
+
+      const registry = await tools.execute('tool_registry', { action: 'describe', toolName: tool.name })
+      expect(registry.success).toBe(true)
+      const actions = Array.isArray(registry.data?.actions) ? registry.data.actions : []
+      expect(actions.length, `${tool.name} must expose at least one action`).toBeGreaterThan(0)
+      for (const action of actions) {
+        if (!digitActionExceptions.has(action.name))
+          expect(action.name, `${tool.name} action`).toMatch(/^[a-z]+(?:_[a-z]+)*$/)
+        expect(action.name, `${tool.name} action`).not.toMatch(/^query_/)
+        expect(action.name, `${tool.name} action`).not.toMatch(/_list$/)
+        expect(action.status, `${tool.name}.${action.name} must be supported`).not.toBe('unsupported')
+      }
+    }
+  })
+
+  it('keeps literal Dev Test Panel calls aligned with the public contract', () => {
+    const definitions = new Map(new UnifiedTools().getTools().map(tool => [tool.name, tool]))
+    const casesDirectory = path.resolve('source/panels/dev-test/cases')
+    let callCount = 0
+    let literalCallCount = 0
+
+    for (const filePath of listTypeScriptFiles(casesDirectory)) {
+      const source = readFileSync(filePath, 'utf8')
+      const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true)
+      const visit = (node: ts.Node): void => {
+        if (ts.isCallExpression(node)
+          && ts.isPropertyAccessExpression(node.expression)
+          && node.expression.name.text === 'callTool'
+          && node.arguments.length >= 2
+          && ts.isStringLiteral(node.arguments[0])) {
+          const toolName = node.arguments[0].text
+          const input = node.arguments[1]
+          callCount++
+          if (ts.isObjectLiteralExpression(input)) {
+            literalCallCount++
+            const actionProperty = input.properties.find(property => ts.isPropertyAssignment(property)
+              && ((ts.isIdentifier(property.name) && property.name.text === 'action')
+                || (ts.isStringLiteral(property.name) && property.name.text === 'action')))
+            expect(actionProperty, `${path.relative(casesDirectory, filePath)} must specify an action for ${toolName}`).toBeDefined()
+            if (actionProperty && ts.isPropertyAssignment(actionProperty)) {
+              expect(ts.isStringLiteral(actionProperty.initializer), `${path.relative(casesDirectory, filePath)} must use a literal action for ${toolName}`).toBe(true)
+              if (ts.isStringLiteral(actionProperty.initializer)) {
+                const action = actionProperty.initializer.text
+                const definition = definitions.get(toolName)
+                expect(definition, `${path.relative(casesDirectory, filePath)} references unknown tool ${toolName}`).toBeDefined()
+                const actions = definition?.inputSchema.properties?.action?.enum ?? []
+                expect(actions, `${path.relative(casesDirectory, filePath)} references unknown action ${toolName}.${action}`).toContain(action)
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, visit)
+      }
+      visit(sourceFile)
+    }
+
+    expect(literalCallCount).toBeGreaterThan(0)
+    expect(callCount - literalCallCount).toBe(2)
   })
 
   it('generates action-specific schemas for diagnostics and utility tools', async () => {
     const tools = new UnifiedTools()
     const debugLogs = tools.getTools().find(tool => tool.name === 'debug_logs')
-    const preferences = tools.getTools().find(tool => tool.name === 'preferences_manage')
-    const referenceImages = tools.getTools().find(tool => tool.name === 'reference_image_manage')
+    const preferences = tools.getTools().find(tool => tool.name === 'preferences')
+    const referenceImages = tools.getTools().find(tool => tool.name === 'reference_image')
     const debugSearch = debugLogs?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'search')
     const preferenceSet = preferences?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'set')
     const referencePosition = referenceImages?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'set_position')
@@ -154,17 +246,13 @@ describe('unified tools', () => {
     expect(debugSearch).toMatchObject({ required: ['action', 'pattern'], additionalProperties: false })
     expect(preferenceSet).toMatchObject({ required: ['action', 'name', 'path', 'value'], additionalProperties: false })
     expect(referencePosition).toMatchObject({ required: ['action', 'x', 'y'], additionalProperties: false })
-
-    const registry = await tools.execute('tool_registry', { action: 'describe', toolName: 'debug_execute' })
-    expect(registry.data).toMatchObject({
-      actions: [expect.objectContaining({ name: 'script', status: 'unsupported' })],
-    })
+    expect(tools.getTools().map(tool => tool.name)).not.toContain('debug_execute')
   })
 
   it('rejects unsupported, missing, and action-mismatched arguments from ActionSpec', async () => {
     const tools = new UnifiedTools()
 
-    await expect(tools.execute('scene_management', { action: 'open', path: 'db://assets/Main.scene' })).resolves.toMatchObject({
+    await expect(tools.execute('scene_lifecycle', { action: 'open', path: 'db://assets/Main.scene' })).resolves.toMatchObject({
       success: false,
       errorCode: 'TOOL_CONTRACT_ERROR',
       error: expect.stringContaining('does not accept: path'),
@@ -178,16 +266,16 @@ describe('unified tools', () => {
         retryable: true,
         nextTool: 'tool_registry',
         nextAction: 'describe',
-        retryWith: { toolName: 'scene_management', action: 'open' },
+        retryWith: { toolName: 'scene_lifecycle', action: 'open' },
         attempted: { action: 'open', path: 'db://assets/Main.scene' },
         allowed: ['action', 'scenePath'],
       },
     })
-    await expect(tools.execute('scene_management', { action: 'open' })).resolves.toMatchObject({
+    await expect(tools.execute('scene_lifecycle', { action: 'open' })).resolves.toMatchObject({
       success: false,
       error: expect.stringContaining('requires: scenePath'),
     })
-    await expect(tools.execute('scene_undo_manage', { action: 'begin' })).resolves.toMatchObject({
+    await expect(tools.execute('scene_undo', { action: 'begin' })).resolves.toMatchObject({
       success: false,
       error: expect.stringContaining('requires one of: nodeUuid or nodeUuids'),
     })
@@ -310,35 +398,27 @@ describe('unified tools', () => {
     expect(calls.length).toBeGreaterThan(0)
   })
 
-  it('hides legacy asset wrappers while keeping them directly callable and describable', async () => {
+  it('removes legacy asset wrappers and exposes the normalized project query', async () => {
     const tools = new UnifiedTools()
     const publicNames = tools.getTools().map(tool => tool.name)
 
-    expect(publicNames).not.toContain('project_query')
     expect(publicNames).not.toContain('project_asset_system')
-    await expect(tools.execute('tool_registry', { action: 'list' })).resolves.toMatchObject({
+    expect(publicNames.filter(name => name === 'project_query')).toHaveLength(1)
+    await expect(tools.execute('tool_registry', { action: 'list_actions' })).resolves.toEqual(expect.objectContaining({
       success: true,
-      data: {
-        tools: expect.not.arrayContaining([
-          expect.objectContaining({ name: 'project_query' }),
-          expect.objectContaining({ name: 'project_asset_system' }),
-        ]),
-      },
-    })
-    await expect(tools.execute('tool_registry', { action: 'actions' })).resolves.toEqual(expect.objectContaining({
-      success: true,
-      data: expect.not.arrayContaining([
-        expect.objectContaining({ name: 'project_query' }),
-        expect.objectContaining({ name: 'project_asset_system' }),
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'project_query',
+          actions: [
+            expect.objectContaining({ name: 'get_info' }),
+            expect.objectContaining({ name: 'get_settings' }),
+          ],
+        }),
       ]),
     }))
     await expect(tools.execute('tool_registry', { action: 'describe', toolName: 'project_query' })).resolves.toMatchObject({
       success: true,
       data: { name: 'project_query' },
-    })
-    await expect(tools.execute('project_query', { action: 'asset_url', uuid: 'missing-uuid' })).resolves.toMatchObject({
-      success: false,
-      errorCode: 'TOOL_ASSET_ERROR',
     })
   })
 
@@ -393,42 +473,32 @@ describe('unified tools', () => {
     const tools = new UnifiedTools()
 
     await expect(tools.execute('asset_query', {
-      action: 'details',
+      action: 'get_details',
       urlOrUUID: 'asset-uuid',
       includeSubAssets: false,
     })).resolves.toMatchObject({
       success: true,
       data: { urlOrUUID: 'asset-uuid', assetUrl: 'db://assets/player.png' },
     })
-    await expect(tools.execute('project_query', {
-      action: 'asset_details',
-      urlOrUUID: 'db://assets/player.png',
-      includeSubAssets: false,
-    })).resolves.toMatchObject({ success: true })
-    await expect(tools.execute('asset_query', {
-      action: 'query_uuid',
-      url: 'db://assets/player.png',
-    })).resolves.toMatchObject({ success: true, data: { uuid: 'asset-uuid' } })
 
     expect(request).toHaveBeenCalledWith('asset-db', 'query-url', 'asset-uuid')
     expect(request).toHaveBeenCalledWith('asset-db', 'query-asset-info', 'db://assets/player.png')
-    expect(request).toHaveBeenCalledWith('asset-db', 'query-uuid', 'db://assets/player.png')
   })
 
   it('accepts overwrite for imports and hides unavailable asset operations', async () => {
     const tools = new UnifiedTools()
-    const assetManage = tools.getTools().find(tool => tool.name === 'asset_manage')
+    const assetManage = tools.getTools().find(tool => tool.name === 'asset_lifecycle')
     const assetAnalyze = tools.getTools().find(tool => tool.name === 'asset_analyze')
     const assetBatch = tools.getTools().find(tool => tool.name === 'asset_batch')
-    const resourceReference = tools.getTools().find(tool => tool.name === 'resource_reference')
-    const preferences = tools.getTools().find(tool => tool.name === 'preferences_manage')
+    const resourceReference = tools.getTools().find(tool => tool.name === 'asset_reference')
+    const preferences = tools.getTools().find(tool => tool.name === 'preferences')
 
     const importSchema = getActionSchema(assetManage!.inputSchema, 'import')
     expect(importSchema).toMatchObject({
       properties: { overwrite: { type: 'boolean' } },
       required: ['action', 'sourcePath', 'targetFolder'],
     })
-    await expect(tools.execute('asset_manage', {
+    await expect(tools.execute('asset_lifecycle', {
       action: 'import',
       sourcePath: '/definitely/missing/player.png',
       targetFolder: 'db://assets/textures',
@@ -456,7 +526,7 @@ describe('unified tools', () => {
 
   it('describes action-specific undo requirements', () => {
     const tools = new UnifiedTools()
-    const undo = tools.getTools().find(tool => tool.name === 'scene_undo_manage')
+    const undo = tools.getTools().find(tool => tool.name === 'scene_undo')
     const begin = undo?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'begin')
     const end = undo?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'end')
     const cancel = undo?.inputSchema.oneOf?.find(schema => schema.properties?.action?.enum?.[0] === 'cancel')
@@ -475,7 +545,9 @@ describe('unified tools', () => {
 
   it('describes action-specific scene execution requirements', () => {
     const tools = new UnifiedTools()
-    const execution = tools.getTools().find(tool => tool.name === 'scene_execution_control')
+    const execution = tools.getTools().find(tool => tool.name === 'scene_execution')
+    const lifecycle = tools.getTools().find(tool => tool.name === 'scene_lifecycle')
+    const query = tools.getTools().find(tool => tool.name === 'scene_query')
 
     expect(execution?.description).toContain('For execute_component_method, `uuid` (the component instance UUID) and `name` (the component method name) are required.')
     expect(execution?.inputSchema.oneOf).toEqual(expect.arrayContaining([
@@ -487,44 +559,30 @@ describe('unified tools', () => {
         properties: expect.objectContaining({ action: { type: 'string', enum: ['execute_scene_script'] } }),
         required: ['action', 'name', 'method'],
       }),
-      expect.objectContaining({
-        properties: expect.objectContaining({ action: { type: 'string', enum: ['restore_prefab'] } }),
-        required: ['action', 'nodeUuid', 'assetUuid'],
-      }),
-      expect.objectContaining({
-        properties: expect.objectContaining({ action: { type: 'string', enum: ['soft_reload'] } }),
-        required: ['action'],
-      }),
-      expect.objectContaining({
-        properties: expect.objectContaining({ action: { type: 'string', enum: ['query_ready'] } }),
-        required: ['action'],
-      }),
-      expect.objectContaining({
-        properties: expect.objectContaining({ action: { type: 'string', enum: ['query_dirty'] } }),
-        required: ['action'],
-      }),
     ]))
+    expect(lifecycle?.inputSchema.properties?.action?.enum).toContain('soft_reload')
+    expect(query?.inputSchema.properties?.action?.enum).toEqual(expect.arrayContaining(['check_ready', 'check_dirty']))
   })
 
   it('keeps unified tool contracts aligned with supported runtime capabilities', () => {
     const tools = new UnifiedTools()
-    const sceneManagement = tools.getTools().find(tool => tool.name === 'scene_management')
+    const sceneManagement = tools.getTools().find(tool => tool.name === 'scene_lifecycle')
     const componentProperty = tools.getTools().find(tool => tool.name === 'component_property')
     const runtime = tools.getTools().find(tool => tool.name === 'project_runtime')
-    const projectManage = tools.getTools().find(tool => tool.name === 'project_manage')
+    const assetLifecycle = tools.getTools().find(tool => tool.name === 'asset_lifecycle')
 
     expect(sceneManagement?.inputSchema.properties).not.toHaveProperty('path')
     expect(componentProperty?.description).toContain('Camera node UUID')
     expect(componentProperty?.description).toContain('camera-node-or-component-uuid')
     expect(runtime?.inputSchema.properties?.action).toMatchObject({ enum: ['run'] })
     expect(runtime?.description).toContain('Project > Preview')
-    expect(projectManage?.description).toContain('{"action":"refresh_assets"')
+    expect(assetLifecycle?.inputSchema.properties?.action?.enum).toContain('refresh')
   })
 
   it('describes 3D component property and runtime limitations explicitly', () => {
     const tools = new UnifiedTools()
     const componentProperty = tools.getTools().find(tool => tool.name === 'component_property')
-    const build = tools.getTools().find(tool => tool.name === 'project_build_system')
+    const build = tools.getTools().find(tool => tool.name === 'project_build')
     const runtime = tools.getTools().find(tool => tool.name === 'project_runtime')
     const performance = tools.getTools().find(tool => tool.name === 'debug_performance')
 
@@ -532,17 +590,18 @@ describe('unified tools', () => {
     expect(componentProperty?.inputSchema.properties?.propertyType).toMatchObject({ description: expect.stringContaining('Property value type') })
     expect(build?.description).toContain('there is no get_config action')
     expect(runtime?.description).toContain('Project > Preview')
-    expect(performance?.description).toContain('not `get_stats`')
+    expect(performance?.description).toContain('only action is `get_stats`')
   })
-  it('rejects arbitrary debug scripts with actionable guidance', async () => {
+  it('does not expose unsupported or duplicate public tools', () => {
     const tools = new UnifiedTools()
+    const toolNames = tools.getTools().map(tool => tool.name)
 
-    await expect(tools.execute('debug_execute', { action: 'script', script: 'Editor.Message.request()' })).resolves.toMatchObject({
-      success: false,
-      error: expect.stringContaining('Action \'script\' is unsupported'),
-      data: expect.objectContaining({ reason: expect.stringContaining('Arbitrary JavaScript execution is not supported') }),
-      instruction: expect.stringContaining('asset_query/project_query'),
-    })
+    expect(toolNames).not.toContain('debug_execute')
+    expect(toolNames).not.toContain('node_reference')
+    expect(toolNames).not.toContain('prefab_reference')
+    expect(tools.getTools().find(tool => tool.name === 'node_hierarchy')?.inputSchema.properties?.action?.enum).toEqual(['move'])
+    expect(tools.getTools().find(tool => tool.name === 'component_property')?.inputSchema.properties?.action?.enum).toEqual(['set'])
+    expect(tools.getTools().find(tool => tool.name === 'asset_reference')?.inputSchema.properties?.action?.enum).toEqual(['nodes_by_asset_uuid'])
   })
 
   it('explains that scene scripts must be registered methods', async () => {
@@ -553,7 +612,7 @@ describe('unified tools', () => {
     })
     const tools = new UnifiedTools()
 
-    await expect(tools.execute('scene_execution_control', {
+    await expect(tools.execute('scene_execution', {
       action: 'execute_scene_script',
       name: 'set-sprite-frame',
       method: 'setSpriteFrame',

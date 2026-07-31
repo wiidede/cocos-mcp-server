@@ -11,14 +11,14 @@ const SCENE_PATH_FOR_TEST = 'db://assets/__dev_test__/SubTestScene.scene'
 
 export const batch1Tests: TestCase[] = [
   // ─────────────────────────────────────────────────────────────
-  // Bug #1 (初版): scene_management.create 同时传 sceneName + path 会报
+  // Bug #1 (初版): scene_lifecycle.create 同时传 sceneName + path 会报
   //   "Cannot read properties of undefined (reading 'endsWith')"，且 message 字段变成
   //   "Scene 'undefined' created successfully"。修复后支持 sceneName + savePath 组合。
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_01:scene_create_sceneName_and_path',
     group: 'regression/batch-1',
-    description: 'scene_management.create 同时传 sceneName + savePath 不应报错，且 message 中 sceneName 正确',
+    description: 'scene_lifecycle.create 同时传 sceneName + savePath 不应报错，且 message 中 sceneName 正确',
     tags: ['regression', 'scene', 'core'],
     regression: {
       bugId: 'v1.5.0-bug-01',
@@ -27,7 +27,7 @@ export const batch1Tests: TestCase[] = [
     },
     run: async (ctx) => {
       // 用临时子场景避免与默认 TestScene 冲突
-      const resp = await ctx.callTool('scene_management', {
+      const resp = await ctx.callTool('scene_lifecycle', {
         action: 'create',
         sceneName: 'SubA',
         savePath: SCENE_PATH_FOR_TEST,
@@ -67,7 +67,7 @@ export const batch1Tests: TestCase[] = [
       const uuid = nodeResp.uuid ?? nodeResp.data?.uuid
       ctx.assert(uuid, 'no uuid returned')
 
-      await ctx.callTool('component_manage', {
+      await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: 'cc.Sprite',
@@ -109,18 +109,18 @@ export const batch1Tests: TestCase[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // Bug #4: node_query.get_info components.type / uuid 缺失。
+  // Bug #4: node_query.get components.type / uuid 缺失。
   //   修复后应能正确解析 __type__/type/uuid 字段。
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_04:node_query_components_full',
     group: 'regression/batch-1',
-    description: 'node_query.get_info 返回的 components 包含完整 type 与 uuid',
+    description: 'node_query.get 返回的 components 包含完整 type 与 uuid',
     tags: ['regression', 'node', 'query', 'component'],
     regression: {
       bugId: 'v1.5.0-bug-04',
       fixedIn: 'v1.5.0',
-      rootCause: 'node_query.get_info 返回的组件信息缺少 type 和 uuid 字段。修复：正确解析 __type__/type/uuid 字段。',
+      rootCause: 'node_query.get 返回的组件信息缺少 type 和 uuid 字段。修复：正确解析 __type__/type/uuid 字段。',
     },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
@@ -131,7 +131,7 @@ export const batch1Tests: TestCase[] = [
       const uuid = nodeResp.uuid ?? nodeResp.data?.uuid
       ctx.assert(uuid, 'no uuid')
 
-      await ctx.callTool('component_manage', {
+      await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: 'cc.Sprite',
@@ -139,7 +139,7 @@ export const batch1Tests: TestCase[] = [
       await sleep(150)
 
       const info: any = await ctx.callTool('node_query', {
-        action: 'get_info',
+        action: 'get',
         uuid,
       })
       ctx.step('get_info returns', info != null)
@@ -155,18 +155,18 @@ export const batch1Tests: TestCase[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // Bug #5: component_query.get_components 默认 payload 过大（~18.9KB）。
+  // Bug #5: component_query.list 默认 payload 过大（~18.9KB）。
   //   修复后默认只返回 type/name/uuid/enabled，不再带 properties。
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_05:component_query_size_default',
     group: 'regression/batch-1',
-    description: 'component_query.get_components 默认 payload 不含 properties',
+    description: 'component_query.list 默认 payload 不含 properties',
     tags: ['regression', 'component', 'query', 'performance'],
     regression: {
       bugId: 'v1.5.0-bug-05',
       fixedIn: 'v1.5.0',
-      rootCause: 'component_query.get_components 默认返回完整 properties，导致 payload 过大（~18.9KB）。修复：默认只返回 type/name/uuid/enabled。',
+      rootCause: 'component_query.list 默认返回完整 properties，导致 payload 过大（~18.9KB）。修复：默认只返回 type/name/uuid/enabled。',
     },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
@@ -177,7 +177,7 @@ export const batch1Tests: TestCase[] = [
       const uuid = nodeResp.uuid ?? nodeResp.data?.uuid
       ctx.assert(uuid, 'no uuid')
 
-      await ctx.callTool('component_manage', {
+      await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: 'cc.Sprite',
@@ -185,7 +185,7 @@ export const batch1Tests: TestCase[] = [
       await sleep(150)
 
       const resp: any = await ctx.callTool('component_query', {
-        action: 'get_components',
+        action: 'list',
         nodeUuid: uuid,
       })
       ctx.step('returns', resp != null)
@@ -204,21 +204,21 @@ export const batch1Tests: TestCase[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // Bug #6: scene_management.create 新建场景没有自动 Canvas。
+  // Bug #6: scene_lifecycle.create 新建场景没有自动 Canvas。
   //   修复后 autoCreateCanvas: true 会在场景里建一个 Canvas 节点。
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_06:scene_create_auto_canvas',
     group: 'regression/batch-1',
-    description: 'scene_management.create autoCreateCanvas=true 自动创建 Canvas 节点',
+    description: 'scene_lifecycle.create autoCreateCanvas=true 自动创建 Canvas 节点',
     tags: ['regression', 'scene', 'node', 'core'],
     regression: {
       bugId: 'v1.5.0-bug-06',
       fixedIn: 'v1.5.0',
-      rootCause: 'scene_management.create 的 autoCreateCanvas 参数未实现。修复：添加自动创建 Canvas 节点的逻辑。',
+      rootCause: 'scene_lifecycle.create 的 autoCreateCanvas 参数未实现。修复：添加自动创建 Canvas 节点的逻辑。',
     },
     run: async (ctx) => {
-      const resp: any = await ctx.callTool('scene_management', {
+      const resp: any = await ctx.callTool('scene_lifecycle', {
         action: 'create',
         savePath: 'db://assets/__dev_test__/CanvasTest.scene',
         autoCreateCanvas: true,
@@ -230,7 +230,7 @@ export const batch1Tests: TestCase[] = [
       // 验证 query-node 能拿到这个节点
       await sleep(300)
       const nodeInfo: any = await ctx.callTool('node_query', {
-        action: 'get_info',
+        action: 'get',
         uuid: canvasUuid,
       })
       ctx.step('canvas node queryable', !!nodeInfo && !nodeInfo.error)
@@ -269,7 +269,7 @@ export const batch1Tests: TestCase[] = [
 
       // 先确认没挂任何脚本
       const comps1: any = await ctx.callTool('component_query', {
-        action: 'get_components',
+        action: 'list',
         nodeUuid: uuid,
       })
       const before = comps1?.data?.components ?? comps1?.components ?? []
@@ -310,18 +310,18 @@ export const batch1Tests: TestCase[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // Bug #8: component_manage.add 传脚本资产 UUID 时报 "was not found on node after addition"。
+  // Bug #8: component_lifecycle.add 传脚本资产 UUID 时报 "was not found on node after addition"。
   //   修复后 UUID 会被先解析为类名再 create-component。
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_08:addComponent_script_uuid',
     group: 'regression/batch-1',
-    description: 'component_manage.add 接受脚本资产 UUID 形式',
+    description: 'component_lifecycle.add 接受脚本资产 UUID 形式',
     tags: ['regression', 'component', 'script', 'asset'],
     regression: {
       bugId: 'v1.5.0-bug-08',
       fixedIn: 'v1.5.0',
-      rootCause: 'component_manage.add 传入脚本资产 UUID 时无法正确识别和添加。修复：先将 UUID 解析为脚本类名再调用 create-component。',
+      rootCause: 'component_lifecycle.add 传入脚本资产 UUID 时无法正确识别和添加。修复：先将 UUID 解析为脚本类名再调用 create-component。',
     },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
@@ -354,7 +354,7 @@ export const batch1Tests: TestCase[] = [
         return
       }
 
-      const resp: any = await ctx.callTool('component_manage', {
+      const resp: any = await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: scriptUuid,
@@ -368,7 +368,7 @@ export const batch1Tests: TestCase[] = [
       // 二次确认：组件确实挂上了
       await sleep(200)
       const comps: any = await ctx.callTool('component_query', {
-        action: 'get_components',
+        action: 'list',
         nodeUuid: uuid,
       })
       const list = comps?.data?.components ?? comps?.components ?? []
@@ -378,18 +378,18 @@ export const batch1Tests: TestCase[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // Bug #9: node_transform.set_property 对 Size/Color/Vec2 静默失败。
+  // Bug #9: node_property.set 对 Size/Color/Vec2 静默失败。
   //   修复后 dump.type 会被自动推导，验证：query-node 回读值与写入一致。
   // ─────────────────────────────────────────────────────────────
   {
     name: 'bug_09:node_transform_set_complex_value',
     group: 'regression/batch-1',
-    description: 'node_transform.set_property 对 Size/Color/Vec2 真的写入并可回读',
+    description: 'node_property.set 对 Size/Color/Vec2 真的写入并可回读',
     tags: ['regression', 'node', 'component', 'property'],
     regression: {
       bugId: 'v1.5.0-bug-09',
       fixedIn: 'v1.5.0',
-      rootCause: 'node_transform.set_property 对复杂类型（Size/Color/Vec2）静默失败。修复：自动推导 dump.type 并正确设置属性值。',
+      rootCause: 'node_property.set 对复杂类型（Size/Color/Vec2）静默失败。修复：自动推导 dump.type 并正确设置属性值。',
     },
     run: async (ctx) => {
       const nodeResp: any = await ctx.callTool('node_lifecycle', {
@@ -401,7 +401,7 @@ export const batch1Tests: TestCase[] = [
       ctx.assert(uuid, 'no uuid')
 
       // 2DNode 不会自动添加 UITransform，需要先 add 才能写 _contentSize
-      await ctx.callTool('component_manage', {
+      await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: 'cc.UITransform',
@@ -420,7 +420,7 @@ export const batch1Tests: TestCase[] = [
       ctx.step('set _contentSize', sizeResp?.success === true, sizeResp?.error ?? sizeResp?.message)
 
       // 写 Color (cc.Sprite.color)
-      await ctx.callTool('component_manage', {
+      await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: 'cc.Sprite',
@@ -436,8 +436,8 @@ export const batch1Tests: TestCase[] = [
       ctx.step('set Sprite.color', colorResp?.success === true, colorResp?.error ?? colorResp?.message)
 
       // 写 Vec2 (Node.position) — Node 直接属性，用 node_transform
-      const posResp: any = await ctx.callTool('node_transform', {
-        action: 'set_property',
+      const posResp: any = await ctx.callTool('node_property', {
+        action: 'set',
         uuid,
         property: 'position',
         value: { x: 100, y: 50 },
@@ -509,7 +509,7 @@ export const batch1Tests: TestCase[] = [
       const uuid = nodeResp.uuid ?? nodeResp.data?.uuid
       ctx.assert(uuid, 'no uuid')
 
-      await ctx.callTool('component_manage', {
+      await ctx.callTool('component_lifecycle', {
         action: 'add',
         nodeUuid: uuid,
         componentType: 'cc.Sprite',

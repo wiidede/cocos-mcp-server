@@ -1,34 +1,64 @@
 /**
  * 回归测试 - 第四批
  *
- * 覆盖 debug_scene 使用未注册场景 IPC 路由的问题。
+ * 覆盖场景层级和 debug_scene 使用未注册场景 IPC 路由的问题。
  */
 
 import type { TestCase } from '../../test-infra/metadata'
 
 export const batch4Tests: TestCase[] = [
   {
-    name: 'batch4_01:debug_scene_node_tree_uses_supported_route',
+    name: 'batch4_01:scene_hierarchy_bounded_tree_uses_supported_route',
     group: 'regression/batch-4',
-    description: 'debug_scene.node_tree 应返回场景树，不调用不存在的 query-hierarchy 路由',
-    tags: ['regression', 'debug', 'scene', 'critical'],
+    description: 'scene_hierarchy.get_tree 应返回可限制深度的场景树，不调用不存在的 query-hierarchy 路由',
+    tags: ['regression', 'scene', 'hierarchy', 'critical'],
     regression: {
       bugId: 'v1.5.3-debug-scene-node-tree',
       fixedIn: 'v1.5.3',
-      rootCause: 'debug_scene.node_tree 调用未注册的 scene/query-hierarchy IPC，而非已验证的 query-node-tree。',
+      rootCause: '旧 debug_scene.node_tree 调用未注册的 scene/query-hierarchy IPC；层级读取现统一由 scene_hierarchy.get_tree 使用 query-node-tree。',
     },
     run: async (ctx) => {
-      const response: any = await ctx.callTool('debug_scene', { action: 'node_tree' })
-      ctx.step('node tree succeeds', response?.success === true, response?.error?.slice(0, 200))
-      ctx.assert(response?.success === true, `node_tree failed: ${response?.error ?? JSON.stringify(response)?.slice(0, 200)}`)
+      const response: any = await ctx.callTool('scene_hierarchy', {
+        action: 'get_tree',
+        includeComponents: true,
+        maxDepth: 1,
+      })
+      ctx.step('bounded scene tree succeeds', response?.success === true, response?.error?.slice(0, 200))
+      ctx.assert(response?.success === true, `get_tree failed: ${response?.error ?? JSON.stringify(response)?.slice(0, 200)}`)
 
       const tree = response.data
       ctx.step('scene root returned', tree?.uuid != null, tree?.name)
-      ctx.assert(tree?.uuid != null, 'node_tree did not return the scene root')
+      ctx.assert(tree?.uuid != null, 'get_tree did not return the scene root')
+      ctx.assert(typeof tree?.childCount === 'number', 'get_tree did not return childCount')
     },
   },
   {
-    name: 'batch4_02:debug_scene_validate_performance_uses_supported_route',
+    name: 'batch4_02:phase4_duplicate_actions_are_removed',
+    group: 'regression/batch-4',
+    description: 'Phase 4 应将树查询归入 scene_hierarchy，并只保留一个 Prefab restore 入口',
+    tags: ['regression', 'contract', 'scene', 'prefab', 'critical'],
+    regression: {
+      bugId: 'public-api-phase-4-duplicates',
+      fixedIn: 'v2.0.0',
+      rootCause: 'debug_scene 与 scene_hierarchy 重复暴露节点树查询，Prefab 恢复由两个参数和行为相同的 action 暴露。',
+    },
+    run: async (ctx) => {
+      const prefab: any = await ctx.callTool('tool_registry', { action: 'describe', toolName: 'prefab_instance' })
+      const debugScene: any = await ctx.callTool('tool_registry', { action: 'describe', toolName: 'debug_scene' })
+      const hierarchy: any = await ctx.callTool('tool_registry', { action: 'describe', toolName: 'scene_hierarchy' })
+      const actionNames = (response: any): string[] => (response?.data?.actions ?? []).map((action: any) => action.name)
+
+      const prefabActions = actionNames(prefab)
+      const debugActions = actionNames(debugScene)
+      const hierarchyActions = actionNames(hierarchy)
+      ctx.assert(prefabActions.includes('restore') && !prefabActions.includes('restore_node'), `unexpected prefab actions: ${prefabActions.join(', ')}`)
+      ctx.assert(!debugActions.includes('get_node_tree'), `unexpected debug_scene actions: ${debugActions.join(', ')}`)
+      ctx.assert(hierarchyActions.includes('get_tree'), `scene_hierarchy.get_tree missing: ${hierarchyActions.join(', ')}`)
+      ctx.step('Phase 4 public contract is normalized', true)
+    },
+  },
+  {
+    name: 'batch4_03:debug_scene_validate_performance_uses_supported_route',
     group: 'regression/batch-4',
     description: 'debug_scene.validate 性能检查应完成，不调用不存在的 query-hierarchy 路由',
     tags: ['regression', 'debug', 'scene', 'critical'],
@@ -48,9 +78,9 @@ export const batch4Tests: TestCase[] = [
     },
   },
   {
-    name: 'batch4_03:scene_undo_multi_target_lifecycle',
+    name: 'batch4_04:scene_undo_multi_target_lifecycle',
     group: 'regression/batch-4',
-    description: 'scene_undo_manage 应支持多目标和 label，并返回可用于 end/cancel 的 undoId',
+    description: 'scene_undo 应支持多目标和 label，并返回可用于 end/cancel 的 undoId',
     tags: ['regression', 'scene', 'undo', 'critical'],
     regression: {
       bugId: 'v1.5.3-scene-undo-contract',
@@ -58,11 +88,11 @@ export const batch4Tests: TestCase[] = [
       rootCause: '公开 schema 只暴露可选 nodeUuid，未表达 Cocos begin-recording 的目标 UUID 集合、tag、显式生命周期及 undoId 契约。',
     },
     run: async (ctx) => {
-      const schemaResponse: any = await ctx.callTool('tool_registry', { action: 'describe', toolName: 'scene_undo_manage' })
+      const schemaResponse: any = await ctx.callTool('tool_registry', { action: 'describe', toolName: 'scene_undo' })
       const schemaProperties = schemaResponse?.data?.inputSchema?.properties
       const schemaComplete = schemaProperties?.nodeUuid && schemaProperties?.nodeUuids && schemaProperties?.label && schemaProperties?.undoId
       ctx.step('undo schema exposes lifecycle parameters', Boolean(schemaComplete), JSON.stringify(Object.keys(schemaProperties ?? {})))
-      ctx.assert(Boolean(schemaComplete), 'scene_undo_manage schema is missing nodeUuid, nodeUuids, label, or undoId')
+      ctx.assert(Boolean(schemaComplete), 'scene_undo schema is missing nodeUuid, nodeUuids, label, or undoId')
 
       const createNode = async (name: string): Promise<string> => {
         const response: any = await ctx.callTool('node_lifecycle', { action: 'create', name, nodeType: '2DNode' })
@@ -73,7 +103,7 @@ export const batch4Tests: TestCase[] = [
       const nodeA = await createNode('UndoTargetA')
       const nodeB = await createNode('UndoTargetB')
 
-      const begin: any = await ctx.callTool('scene_undo_manage', {
+      const begin: any = await ctx.callTool('scene_undo', {
         action: 'begin',
         nodeUuids: [nodeA, nodeB],
         label: 'Dev Test Multi Target Undo',
@@ -82,30 +112,30 @@ export const batch4Tests: TestCase[] = [
       ctx.step('begin returns undoId', typeof undoId === 'string' && undoId.length > 0, String(undoId))
       ctx.assert(begin?.success === true && typeof undoId === 'string' && undoId.length > 0, begin?.error ?? 'begin returned no undoId')
 
-      const renameA: any = await ctx.callTool('node_transform', { action: 'set_property', uuid: nodeA, property: 'name', value: 'UndoTargetAChanged' })
-      const renameB: any = await ctx.callTool('node_transform', { action: 'set_property', uuid: nodeB, property: 'name', value: 'UndoTargetBChanged' })
+      const renameA: any = await ctx.callTool('node_property', { action: 'set', uuid: nodeA, property: 'name', value: 'UndoTargetAChanged' })
+      const renameB: any = await ctx.callTool('node_property', { action: 'set', uuid: nodeB, property: 'name', value: 'UndoTargetBChanged' })
       ctx.assert(renameA?.success === true && renameB?.success === true, `target mutation failed: A=${renameA?.error}, B=${renameB?.error}`)
 
-      const end: any = await ctx.callTool('scene_undo_manage', { action: 'end', undoId })
+      const end: any = await ctx.callTool('scene_undo', { action: 'end', undoId })
       ctx.step('end accepts undoId', end?.success === true, end?.error)
       ctx.assert(end?.success === true, end?.error ?? 'end failed')
 
-      const secondBegin: any = await ctx.callTool('scene_undo_manage', {
+      const secondBegin: any = await ctx.callTool('scene_undo', {
         action: 'begin',
         nodeUuid: nodeA,
         label: 'Dev Test Cancel Undo',
       })
       const secondUndoId = secondBegin?.data?.undoId
       ctx.assert(typeof secondUndoId === 'string' && secondUndoId.length > 0, secondBegin?.error ?? 'second begin returned no undoId')
-      const cancel: any = await ctx.callTool('scene_undo_manage', { action: 'cancel', undoId: secondUndoId })
+      const cancel: any = await ctx.callTool('scene_undo', { action: 'cancel', undoId: secondUndoId })
       ctx.step('cancel accepts undoId', cancel?.success === true, cancel?.error)
       ctx.assert(cancel?.success === true, cancel?.error ?? 'cancel failed')
     },
   },
   {
-    name: 'batch4_04:prefab_create_and_validate_complete_asset',
+    name: 'batch4_05:prefab_create_and_validate_complete_asset',
     group: 'regression/batch-4',
-    description: 'prefab_lifecycle.create 应首次写入完整 Prefab，prefab_browse.validate 应通过 query-path 读取并验证',
+    description: 'prefab_lifecycle.create 应首次写入完整 Prefab，prefab_query.validate 应通过 query-path 读取并验证',
     environment: 'scene',
     tags: ['regression', 'prefab', 'asset-db', 'critical'],
     regression: {
@@ -130,7 +160,7 @@ export const batch4Tests: TestCase[] = [
         prefabName: 'PrefabLifecycleRegression',
       })
       const validateResponse: any = createResponse?.success === true
-        ? await ctx.callTool('prefab_browse', { action: 'validate', prefabPath })
+        ? await ctx.callTool('prefab_query', { action: 'validate', prefabPath })
         : null
       const instantiateResponse: any = createResponse?.success === true
         ? await ctx.callTool('prefab_instance', { action: 'instantiate', prefabPath })
@@ -141,7 +171,7 @@ export const batch4Tests: TestCase[] = [
         ? instantiateResponse.data.candidateNodeUuids.filter((uuid: unknown): uuid is string => typeof uuid === 'string')
         : []
       const referenceResponse: any = createResponse?.success === true
-        ? await ctx.callTool('prefab_reference', { action: 'nodes_by_asset_uuid', assetUuid: createResponse?.data?.prefabUuid })
+        ? await ctx.callTool('asset_reference', { action: 'nodes_by_asset_uuid', assetUuid: createResponse?.data?.prefabUuid })
         : null
 
       const linkedNodeUuids = Array.isArray(referenceResponse?.data?.nodeUuids)
@@ -150,7 +180,7 @@ export const batch4Tests: TestCase[] = [
       const cleanupNodeUuids = new Set([nodeUuid, instanceUuid, createdInstanceUuid, ...candidateNodeUuids, ...linkedNodeUuids].filter((uuid): uuid is string => typeof uuid === 'string'))
       for (const uuid of cleanupNodeUuids)
         await ctx.callTool('node_lifecycle', { action: 'delete', uuid }).catch(() => undefined)
-      await ctx.callTool('asset_manage', { action: 'delete', url: prefabPath }).catch(() => undefined)
+      await ctx.callTool('asset_lifecycle', { action: 'delete', url: prefabPath }).catch(() => undefined)
 
       ctx.step('create returns a valid imported asset', createResponse?.success === true && createResponse?.data?.invalid === false, createResponse?.error)
       ctx.assert(createResponse?.success === true, createResponse?.error ?? 'prefab create failed')
@@ -165,9 +195,9 @@ export const batch4Tests: TestCase[] = [
     },
   },
   {
-    name: 'batch4_05:prefab_browse_load_opens_prefab_editor',
+    name: 'batch4_06:prefab_query_load_opens_prefab_editor',
     group: 'regression/batch-4',
-    description: 'prefab_browse.load 应通过 asset-db/open-asset 打开有效 Prefab，而不是调用不存在的 scene/load-asset',
+    description: 'prefab_query.load 应通过 asset-db/open-asset 打开有效 Prefab，而不是调用不存在的 scene/load-asset',
     environment: 'prefab',
     tags: ['regression', 'prefab', 'asset-db', 'critical'],
     regression: {
@@ -195,11 +225,11 @@ export const batch4Tests: TestCase[] = [
       ctx.assert(createResponse?.success === true, createResponse?.error ?? 'prefab create failed')
       ctx.trackAsset(prefabPath)
 
-      // The test intentionally verifies prefab_browse.load, but the test
+      // The test intentionally verifies prefab_query.load, but the test
       // session must perform the context switch first. Otherwise load's own
       // open-asset call can hit Cocos' dirty-scene modal and block the test.
       await ctx.ensurePrefabContext(prefabPath)
-      const loadResponse = await ctx.callTool('prefab_browse', { action: 'load', prefabPath })
+      const loadResponse = await ctx.callTool('prefab_query', { action: 'load', prefabPath })
       const loaded = loadResponse?.success === true
         && loadResponse?.data?.uuid === createResponse?.data?.prefabUuid
         && loadResponse?.data?.prefabPath === prefabPath

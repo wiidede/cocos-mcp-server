@@ -71,7 +71,7 @@ async function addComponentSafely(
   componentType: string,
 ): Promise<boolean> {
   try {
-    const resp: any = await ctx.callTool('component_manage', {
+    const resp: any = await ctx.callTool('component_lifecycle', {
       action: 'add',
       nodeUuid,
       componentType,
@@ -91,7 +91,7 @@ async function addComponentSafely(
   }
 }
 
-/** 调 create_default_spriteframe（走 asset_manage 统一工具） */
+/** 调 create_default_spriteframe（走 asset_lifecycle 统一工具） */
 async function createDefaultSpriteframe(
   ctx: { callTool: (n: string, a: any) => Promise<any>, step: (n: string, ok: boolean, m?: string) => void, assert: (c: any, m: string) => void, trackAsset: (url: string) => void },
   args: { color?: string, size?: number, savePath?: string } = {},
@@ -101,7 +101,7 @@ async function createDefaultSpriteframe(
     ...args,
     savePath: args.savePath || `${testTextureDir}/texture_${args.color?.replace(/[^a-z0-9]/gi, '') || 'white'}_${args.size || 4}px.png`,
   }
-  const resp: any = await ctx.callTool('asset_manage', {
+  const resp: any = await ctx.callTool('asset_lifecycle', {
     action: 'create_default_spriteframe',
     ...testArgs,
   })
@@ -334,17 +334,17 @@ export const batch2Tests: TestCase[] = [
   },
 
   // ───────────────────────────────────────────────────────────
-  // Bug B：node_transform.set_property 接受 { __type__, __id__ } 格式
+  // Bug B：node_property.set 接受 { __type__, __id__ } 格式
   // ───────────────────────────────────────────────────────────
   {
     name: 'recent_05:node_transform_set_node_reference_via_serialized_format',
     group: 'regression/batch-2',
-    description: 'node_transform.set_property 接受 Cocos scene 序列化格式 { __type__: "cc.Node", __id__: "uuid" }',
+    description: 'node_property.set 接受 Cocos scene 序列化格式 { __type__: "cc.Node", __id__: "uuid" }',
     tags: ['regression', 'node', 'property', 'serialization'],
     regression: {
       bugId: 'v1.5.1-recent-05',
       fixedIn: 'v1.5.1',
-      rootCause: 'node_transform.set_property 无法处理 Cocos 场景序列化格式 {__type__, __id__}，导致 dump.type 错误。修复：normalizeValueForDump 将其转换为 {uuid} 格式。',
+      rootCause: 'node_property.set 无法处理 Cocos 场景序列化格式 {__type__, __id__}，导致 dump.type 错误。修复：normalizeValueForDump 将其转换为 {uuid} 格式。',
     },
     run: async (ctx) => {
       // 创建 A / B，B 是 A 的子节点
@@ -353,8 +353,8 @@ export const batch2Tests: TestCase[] = [
       ctx.step('B is child of A by default', true, `${b} parent=${a}`)
 
       // 用 {__type__, __id__} 格式触发 dump 规范化（不期望真正写入 parent，因为 Node.parent 是 readOnly）
-      const resp: any = await ctx.callTool('node_transform', {
-        action: 'set_property',
+      const resp: any = await ctx.callTool('node_property', {
+        action: 'set',
         uuid: b,
         property: 'parent',
         value: { __type__: 'cc.Node', __id__: a },

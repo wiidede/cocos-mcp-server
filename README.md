@@ -10,6 +10,7 @@
 
 - 同一 `/mcp` endpoint 同时支持 legacy MCP `2024-11-05` 和 modern MCP `2026-07-28`。modern transport 提供 `server/discover`、逐请求 `_meta`、HTTP routing header 校验、`resultType` 与 `structuredContent`，旧客户端仍可使用 `initialize`。
 - 使用统一工具注册表和 action-specific schema；每个 action 只公开允许参数。客户端可通过 `tools/list` 获取实时契约，通过 `tool_registry.describe` 查询必填字段、最小示例、deprecated 状态和能力状态。
+- 统一工具和 action 命名规则，按“领域 + 能力”组织公开 API，并优先使用 `get`、`list`、`find`、`check`、`set` 等明确语义。减少重复 wrapper、模糊的 `manage` / `query_*` 名称和重复 action，帮助 AI 客户端更快选择正确的工具与操作，提高首次调用成功率。
 - 提供稳定的机器错误码，并在契约错误中返回 attempted/allowed 上下文，便于客户端自动修正参数，而不是依赖错误文本。
 - 收敛资源 API：推荐使用 `asset_query.resolve_identity` 一次解析 URL、UUID 和文件系统路径；旧转换 action 保持兼容但标记 deprecated。资源导入支持显式 `overwrite` 和安全冲突提示。
 - 隐藏重复的 legacy public wrapper 和当前不可用 action，直接调用兼容路径仍然保留，减少 `tools/list` 噪音和误调用。
@@ -54,7 +55,17 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp
 
 ## 工具调用
 
-工具使用统一的 `action` 参数。AI 客户端连接后会通过 MCP `tools/list` 自动获取当前工具、操作和 **action-specific** 参数 schema；这份 schema 是唯一权威来源。复杂、低频或调用失败后，可使用 `tool_registry.describe` 查询某个工具中每个 action 的允许字段、必填字段、最小示例和能力状态。
+工具使用统一的 `action` 参数。AI 客户端连接后会通过 MCP `tools/list` 自动获取当前工具、操作和 **action-specific** 参数 schema；这份 schema 是唯一权威来源。规范化的工具名称和 action 名称会把领域、能力和操作语义直接表达出来，例如：
+
+- `scene_lifecycle.get_current`：获取当前场景
+- `scene_hierarchy.get_tree`：读取场景层级
+- `node_query.find`：按条件查找节点
+- `component_query.list`：列出节点组件
+- `asset_query.resolve_identity`：解析资源身份
+
+因此，工具名称规范化、明确的 action 命名、严格的 action-specific schema 和实时 `tools/list` 会共同降低工具选错、action 拼错以及参数串用的概率。它们改善的是模型选择工具和生成参数的成功率；协议版本协商、HTTP endpoint 和 MCP adapter 负责的是请求能否正常连接到服务端，两者属于不同层次。
+
+复杂、低频或调用失败后，可使用 `tool_registry.describe` 查询某个工具中每个 action 的允许字段、必填字段、最小示例和能力状态。
 
 例如创建 3D 节点并直接添加组件：
 
@@ -87,11 +98,11 @@ claude mcp add --transport http cocos-creator http://127.0.0.1:3000/mcp
 
 常见工具包括：
 
-- `scene_management`、`scene_hierarchy`：场景读取、打开和保存
-- `node_query`、`node_lifecycle`、`node_transform`：节点查询和编辑
-- `component_manage`、`component_query`、`component_property`：组件管理和属性设置
-- `prefab_*`、`asset_*`、`project_*`：预制体、资源和项目操作
-- `debug_*`：日志、场景树和诊断
+- `scene_lifecycle`、`scene_hierarchy`：场景生命周期和层级读取
+- `node_query`、`node_lifecycle`、`node_property`：节点查询、创建和属性编辑
+- `component_lifecycle`、`component_query`、`component_property`：组件管理、查询和属性设置
+- `prefab_query`、`prefab_lifecycle`、`prefab_instance`、`asset_query`、`asset_lifecycle`：预制体和资源操作
+- `project_query`、`project_build`、`debug_*`：项目管理、构建和诊断
 
 执行写操作前先查询 UUID；名称不是唯一标识。更多调用约定见 [TOOLS.md](TOOLS.md)。
 
@@ -110,6 +121,6 @@ pnpm lint
 - Cocos Creator 3.8.6 或更高版本
 - Node.js（由 Cocos Creator 提供）
 
-## 许可证
+## 授权说明
 
-本项目仅供学习、交流和二次开发；不得用于商业用途或转售。商业使用请联系原作者。
+本项目基于原项目 fork，为非官方版本，仅供学习、交流和个人非商业使用。不得用于商业用途或转售；商业使用请联系原作者。

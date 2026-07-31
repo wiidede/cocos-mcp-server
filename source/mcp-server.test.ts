@@ -51,7 +51,7 @@ describe('mcp protocol handler', () => {
       id: 2,
       method: 'tools/call',
       params: {
-        name: 'scene_management',
+        name: 'scene_lifecycle',
         arguments: { action: 'not_supported' },
       },
     })).resolves.toMatchObject({
@@ -145,7 +145,7 @@ describe('mcp protocol handler', () => {
       method: 'tools/call',
       params: {
         _meta: modernMeta,
-        name: 'scene_management',
+        name: 'scene_lifecycle',
         arguments: { action: 'not_supported' },
       },
     }, 'modern')).resolves.toMatchObject({
@@ -169,7 +169,7 @@ describe('mcp protocol handler', () => {
       method: 'tools/call',
       params: {
         _meta: modernMeta,
-        name: 'scene_management',
+        name: 'scene_lifecycle',
         arguments: { action: 'not_supported' },
       },
     }, 'modern') as { result: Record<string, unknown> }
@@ -269,7 +269,7 @@ describe('mcp protocol handler', () => {
           method: 'tools/call',
           params: {
             _meta: modernMeta,
-            name: 'scene_management',
+            name: 'scene_lifecycle',
             arguments: { action: 'get_current' },
           },
         }),
@@ -326,14 +326,14 @@ describe('mcp protocol handler', () => {
     }
     internal.unifiedTools.execute = execute
 
-    await expect(server.executeToolCall('asset_manage', {
+    await expect(server.executeToolCall('asset_lifecycle', {
       action: 'create_default_spriteframe',
-    })).rejects.toThrow('Tool asset_manage is not enabled')
+    })).rejects.toThrow('Tool asset_lifecycle is not enabled')
 
-    await expect(server.executeDevTestToolCall('asset_manage', {
+    await expect(server.executeDevTestToolCall('asset_lifecycle', {
       action: 'create_default_spriteframe',
     })).resolves.toEqual({ success: true })
-    expect(execute).toHaveBeenCalledWith('asset_manage', {
+    expect(execute).toHaveBeenCalledWith('asset_lifecycle', {
       action: 'create_default_spriteframe',
     })
   })

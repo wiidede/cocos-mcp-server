@@ -1,6 +1,6 @@
 # Cocos Creator MCP Server
 
-[中文](README.md) | [Tool usage](TOOLS.md)
+[中文](README.md) | [Tool Usage](TOOLS.md)
 
 An MCP server for Cocos Creator 3.8.6+. It lets AI clients control scenes, nodes, components, prefabs, assets, and project operations over HTTP.
 
@@ -10,6 +10,7 @@ This project is forked from [DaxianLee/cocos-mcp-server](https://github.com/Daxi
 
 - Supports legacy MCP `2024-11-05` and modern MCP `2026-07-28` on the same `/mcp` endpoint. The modern transport provides `server/discover`, per-request `_meta`, HTTP routing-header validation, `resultType`, and `structuredContent`, while existing clients may continue to use `initialize`.
 - Uses a unified tool registry with action-specific schemas, so every action exposes only valid parameters. Clients obtain live contracts from `tools/list`; `tool_registry.describe` provides required fields, minimal examples, deprecation status, and capability status.
+- Standardizes tool and action naming around `domain + capability`, with clear verbs such as `get`, `list`, `find`, `check`, and `set`. This reduces duplicate wrappers, vague `manage` / `query_*` names, and duplicate actions, helping AI clients select the correct operation and improving first-call success rates.
 - Provides stable machine-readable error codes and attempted/allowed context for contract failures, enabling clients to correct requests without parsing error prose.
 - Consolidates asset APIs around `asset_query.resolve_identity`, which resolves an asset URL, UUID, and filesystem path in one call. Legacy conversion actions remain compatible but are deprecated. Asset imports support explicit `overwrite` behavior and safe conflict guidance.
 - Hides duplicate legacy public wrappers and unavailable actions while retaining direct-call compatibility, reducing `tools/list` noise and accidental calls.
@@ -54,7 +55,17 @@ The server supports both legacy `2024-11-05` and modern `2026-07-28`. Legacy cli
 
 ## Calling Tools
 
-Tools use a shared `action` parameter. After connecting, an AI client receives the current tools, actions, and **action-specific** input schemas through MCP `tools/list`; that schema is the source of truth. For complex, infrequent, or failed calls, use `tool_registry.describe` to retrieve allowed and required fields, minimal examples, and capability status for every action.
+Tools use a shared `action` parameter. After connecting, an AI client receives the current tools, actions, and **action-specific** input schemas through MCP `tools/list`; that schema is the source of truth. Normalized tool and action names express the domain, capability, and operation semantics directly. For example:
+
+- `scene_lifecycle.get_current`: get the current scene
+- `scene_hierarchy.get_tree`: read the scene hierarchy
+- `node_query.find`: find nodes by criteria
+- `component_query.list`: list a node's components
+- `asset_query.resolve_identity`: resolve an asset identity
+
+Together, normalized tool names, explicit action names, strict action-specific schemas, and live `tools/list` reduce wrong-tool selection, misspelled actions, and cross-action parameter mixing. They improve the model's success rate when selecting tools and generating arguments; protocol version negotiation, the HTTP endpoint, and the MCP adapter determine whether requests can connect to the server, which is a separate layer.
+
+For complex, infrequent, or failed calls, use `tool_registry.describe` to retrieve allowed and required fields, minimal examples, and capability status for every action.
 
 For example, create a 3D node and attach a component in one call:
 
@@ -87,11 +98,11 @@ Do not pass fields belonging to a different action: the schema returns precise p
 
 Common tools include:
 
-- `scene_management`, `scene_hierarchy`: read, open, and save scenes
-- `node_query`, `node_lifecycle`, `node_transform`: inspect and edit nodes
-- `component_manage`, `component_query`, `component_property`: manage components and properties
-- `prefab_*`, `asset_*`, `project_*`: prefab, asset, and project operations
-- `debug_*`: logs, scene trees, and diagnostics
+- `scene_lifecycle`, `scene_hierarchy`: scene lifecycle and hierarchy reads
+- `node_query`, `node_lifecycle`, `node_property`: query, create, and edit node properties
+- `component_lifecycle`, `component_query`, `component_property`: manage, query, and set component properties
+- `prefab_query`, `prefab_lifecycle`, `prefab_instance`, `asset_query`, `asset_lifecycle`: prefab and asset operations
+- `project_query`, `project_build`, `debug_*`: project management, builds, and diagnostics
 
 Query UUIDs before write operations: names are not unique. See [TOOLS.md](TOOLS.md) for usage conventions.
 
@@ -105,11 +116,11 @@ pnpm lint
 
 The development test panel is available at `Extension > Cocos MCP Server > Dev Test Panel`. Tool implementations are in `source/tools/`; the public registry and schemas are in `source/tools/unified-tools.ts`.
 
-## Requirements
+## Compatibility
 
 - Cocos Creator 3.8.6 or later
 - Node.js bundled with Cocos Creator
 
-## License
+## Usage Terms
 
-This project is for learning, communication, and secondary development only. Commercial use and resale are not permitted; contact the original author for commercial licensing.
+This is an unofficial fork for learning, communication, and personal non-commercial use only. Commercial use and resale are not permitted; contact the original author for commercial use.

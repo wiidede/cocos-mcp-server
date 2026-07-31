@@ -7,16 +7,24 @@ export interface SceneHierarchyNode {
   type?: string
   active?: boolean
   components?: Array<{ type: string, enabled: boolean }>
+  childCount: number
+  truncated?: boolean
   children: SceneHierarchyNode[]
 }
 
-export function buildSceneHierarchy(node: SceneNodeDump, includeComponents: boolean): SceneHierarchyNode {
+export function buildSceneHierarchy(node: SceneNodeDump, includeComponents: boolean, maxDepth?: number, depth: number = 0): SceneHierarchyNode {
+  const children = Array.isArray(node.children) ? node.children : []
+  const truncated = maxDepth !== undefined && depth >= maxDepth && children.length > 0
   const result: SceneHierarchyNode = {
     uuid: node.uuid,
     name: node.name,
     type: node.type,
     active: node.active,
-    children: Array.isArray(node.children) ? node.children.map(child => buildSceneHierarchy(child, includeComponents)) : [],
+    childCount: children.length,
+    children: truncated ? [] : children.map(child => buildSceneHierarchy(child, includeComponents, maxDepth, depth + 1)),
+  }
+  if (truncated) {
+    result.truncated = true
   }
   if (includeComponents && Array.isArray(node.__comps__)) {
     result.components = node.__comps__.map(component => ({
