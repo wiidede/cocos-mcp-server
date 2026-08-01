@@ -12,6 +12,7 @@ export default defineConfig({
   format: 'cjs',
   platform: 'node',
   target: 'node18',
+  minify: true,
   dts: false,
   sourcemap: false,
   deps: {

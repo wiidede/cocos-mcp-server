@@ -41,7 +41,6 @@
       "title": "i18n:cocos-mcp-server.panel_title",
       "type": "dockable",
       "main": "dist/panels/default/index.cjs",
-      "icon": "./dist/static/icon.png",
       "size": {
         "min-width": 400,
         "min-height": 300,
@@ -53,7 +52,6 @@
       "title": "Dev Test",
       "type": "dockable",
       "main": "dist/panels/dev-test/index.cjs",
-      "icon": "./dist/static/icon.png",
       "size": {
         "min-width": 600,
         "min-height": 400,

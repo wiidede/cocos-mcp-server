@@ -30,7 +30,6 @@ cocos-mcp-server-pkg/
     ├── main.cjs
     ├── scene.cjs
     ├── static/
-    │   ├── icon.png
     │   ├── template/
     │   └── style/
     └── panels/
@@ -49,7 +48,7 @@ cocos-mcp-server-pkg/
 
 ### 2. 打包 Vue
 
-更新 tsdown 配置，让 `vue` 始终进入面板 CJS bundle，同时继续将 `cc` 标记为外部模块。Node 内置模块保持外部模块，不尝试打包。
+更新 tsdown 配置，让 `vue` 始终进入面板 CJS bundle，同时继续将 `cc` 标记为外部模块。Node 内置模块保持外部模块，不尝试打包。所有 CJS 输出统一开启 `minify`，减少发布包体积。
 
 构建产物中不应再出现：
 
@@ -94,13 +93,7 @@ const staticDir = join(__dirname, '../../static')
 
 ### 5. 更新 Cocos 清单路径
 
-根目录和发布版 `package.json` 中的面板图标统一指向：
-
-```text
-./dist/static/icon.png
-```
-
-面板入口和 scene 入口继续指向 `dist/` 下的 CJS 文件。
+面板入口和 scene 入口继续指向 `dist/` 下的 CJS 文件。面板不再配置自定义图标，使用 Cocos Creator 的默认面板图标。
 
 根目录清单用于本地调试，发布脚本生成的清单用于最终交付；发布版清单不携带任何 npm 运行时依赖。
 
@@ -143,5 +136,5 @@ pnpm release
 - 面板 CJS 不再 require `vue`、`fs-extra` 等第三方模块；
 - `cc` 仍由 Cocos Creator 提供，不被错误打包；
 - default、dev-test、tool-manager 三个面板的 HTML/CSS 可以读取；
-- 图标路径、i18n、main、scene 和 panel 入口均有效；
+- i18n、main、scene 和 panel 入口均有效；
 - 本地 `dist/` 和最终 `cocos-mcp-server-pkg/` 使用同一套构建产物。
