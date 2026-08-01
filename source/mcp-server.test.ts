@@ -26,15 +26,33 @@ const modernMeta = {
 }
 
 describe('mcp protocol handler', () => {
-  it('negotiates initialization and advertises the supported protocol', async () => {
+  it.each(['2025-03-26', '2025-06-18', '2025-11-25'] as const)('negotiates supported legacy protocol %s', async (protocolVersion) => {
     await expect(handle({
       jsonrpc: '2.0',
       id: 1,
       method: 'initialize',
-      params: { protocolVersion: '2024-11-05' },
+      params: { protocolVersion },
     })).resolves.toMatchObject({
       id: 1,
-      result: { protocolVersion: '2024-11-05' },
+      result: { protocolVersion },
+    })
+  })
+
+  it('rejects the old HTTP+SSE protocol during initialization', async () => {
+    await expect(handle({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'initialize',
+      params: { protocolVersion: '2024-11-05' },
+    })).resolves.toMatchObject({
+      id: 2,
+      error: {
+        code: -32022,
+        data: {
+          requested: '2024-11-05',
+          supported: ['2025-03-26', '2025-06-18', '2025-11-25', '2026-07-28'],
+        },
+      },
     })
   })
 
@@ -72,7 +90,7 @@ describe('mcp protocol handler', () => {
         resultType: 'complete',
         ttlMs: 0,
         cacheScope: 'public',
-        supportedVersions: ['2026-07-28', '2024-11-05'],
+        supportedVersions: ['2025-03-26', '2025-06-18', '2025-11-25', '2026-07-28'],
         capabilities: { tools: {} },
         _meta: {
           'io.modelcontextprotocol/serverInfo': {
@@ -118,7 +136,7 @@ describe('mcp protocol handler', () => {
         code: -32022,
         data: {
           requested: '2099-01-01',
-          supported: ['2026-07-28', '2024-11-05'],
+          supported: ['2025-03-26', '2025-06-18', '2025-11-25', '2026-07-28'],
         },
       },
     })
@@ -176,6 +194,88 @@ describe('mcp protocol handler', () => {
 
     expect(response.result).not.toHaveProperty('ttlMs')
     expect(response.result).not.toHaveProperty('cacheScope')
+  })
+
+  it('creates and reuses a legacy Streamable HTTP session', async () => {
+    const server = new MCPServer(settings)
+    await server.start()
+    const internal = server as unknown as { httpServer: { address: () => { port: number } } }
+    const port = internal.httpServer.address().port
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+    }
+
+    try {
+      const initialize = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'legacy-init',
+          method: 'initialize',
+          params: { protocolVersion: '2025-11-25' },
+        }),
+      })
+      expect(initialize.status).toBe(200)
+      const sessionId = initialize.headers.get('mcp-session-id')
+      expect(sessionId).toEqual(expect.any(String))
+
+      const initialized = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: { ...headers, 'Mcp-Session-Id': sessionId! },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      })
+      expect(initialized.status).toBe(202)
+
+      const stream = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'GET',
+        headers: { 'accept': 'text/event-stream', 'Mcp-Session-Id': sessionId! },
+      })
+      expect(stream.status).toBe(200)
+      expect(stream.headers.get('content-type')).toContain('text/event-stream')
+      await stream.body?.cancel()
+
+      const tools = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: { ...headers, 'Mcp-Session-Id': sessionId! },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'legacy-tools', method: 'tools/list' }),
+      })
+      expect(tools.status).toBe(200)
+      await expect(tools.json()).resolves.toMatchObject({ result: { tools: expect.any(Array) } })
+
+      const deleted = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'DELETE',
+        headers: { 'Mcp-Session-Id': sessionId! },
+      })
+      expect(deleted.status).toBe(204)
+    }
+    finally {
+      server.stop()
+    }
+  })
+
+  it('rejects legacy requests without an initialized session', async () => {
+    const server = new MCPServer(settings)
+    await server.start()
+    const internal = server as unknown as { httpServer: { address: () => { port: number } } }
+    const port = internal.httpServer.address().port
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'tools/list' }),
+      })
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toMatchObject({ error: { code: -32000 } })
+    }
+    finally {
+      server.stop()
+    }
   })
 
   it('validates modern HTTP routing headers and status codes', async () => {

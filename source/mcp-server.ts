@@ -1,5 +1,6 @@
 import type { MCPClient, MCPServerSettings, ServerStatus, ToolConfig, ToolDefinition, ToolResponse } from './types'
 import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
 import * as http from 'node:http'
 import packageMetadata from '../package.json'
 import { UnifiedTools } from './tools/unified-tools'
@@ -24,12 +25,20 @@ interface InitializeParams extends JsonRecord {
   protocolVersion: string
 }
 
-const LEGACY_PROTOCOL_VERSION = '2024-11-05'
+const LEGACY_PROTOCOL_VERSIONS = ['2025-03-26', '2025-06-18', '2025-11-25'] as const
 const MODERN_PROTOCOL_VERSION = '2026-07-28'
-const SUPPORTED_PROTOCOL_VERSIONS = [MODERN_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION]
+const SUPPORTED_PROTOCOL_VERSIONS = [...LEGACY_PROTOCOL_VERSIONS, MODERN_PROTOCOL_VERSION]
 const SERVER_INFO = { name: packageMetadata.name, version: packageMetadata.version } as const
 
+type LegacyProtocolVersion = typeof LEGACY_PROTOCOL_VERSIONS[number]
 type ProtocolEra = 'legacy' | 'modern'
+
+interface MCPHttpSession {
+  id: string
+  protocolVersion: LegacyProtocolVersion
+  lastActivity: Date
+  stream?: http.ServerResponse
+}
 
 interface SimplifiedToolDefinition {
   name: string
@@ -62,6 +71,7 @@ export class MCPServer {
   private settings: MCPServerSettings
   private httpServer: http.Server | null = null
   private clients: Map<string, MCPClient> = new Map()
+  private sessions: Map<string, MCPHttpSession> = new Map()
   private unifiedTools!: UnifiedTools
   private toolsList: ToolDefinition[] = []
   private enabledTools: ToolConfig[] = []
@@ -189,7 +199,7 @@ export class MCPServer {
     const allowedOrigin = this.resolveCorsOrigin(requestOrigin)
     res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Session-Id')
     res.setHeader('Content-Type', 'application/json')
 
     if (req.method === 'OPTIONS') {
@@ -201,6 +211,12 @@ export class MCPServer {
     try {
       if (pathname === '/mcp' && req.method === 'POST') {
         await this.handleMCPRequest(req, res)
+      }
+      else if (pathname === '/mcp' && req.method === 'DELETE') {
+        this.handleMCPSessionDelete(req, res)
+      }
+      else if (pathname === '/mcp' && req.method === 'GET') {
+        this.handleMCPSessionStream(req, res)
       }
       else if (pathname === '/health' && req.method === 'GET') {
         res.writeHead(200)
@@ -225,6 +241,51 @@ export class MCPServer {
     }
   }
 
+  private handleMCPSessionStream(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const sessionId = this.getHeader(req.headers, 'mcp-session-id')
+    const session = sessionId ? this.sessions.get(sessionId) : undefined
+    const accept = this.getHeader(req.headers, 'accept') ?? ''
+    if (!sessionId || !session) {
+      res.writeHead(404)
+      res.end(JSON.stringify(this.createErrorResponse(null, -32000, 'Unknown MCP session')))
+      return
+    }
+    if (!accept.includes('text/event-stream')) {
+      res.writeHead(406)
+      res.end(JSON.stringify(this.createErrorResponse(null, -32600, 'Accept must include text/event-stream')))
+      return
+    }
+
+    session.lastActivity = new Date()
+    session.stream?.end()
+    session.stream = res
+    res.writeHead(200, {
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Content-Type': 'text/event-stream',
+    })
+    res.write(': mcp stream connected\n\n')
+    req.on('close', () => {
+      if (session.stream === res) {
+        session.stream = undefined
+      }
+    })
+  }
+
+  private handleMCPSessionDelete(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const sessionId = this.getHeader(req.headers, 'mcp-session-id')
+    const session = sessionId ? this.sessions.get(sessionId) : undefined
+    if (!sessionId || !session) {
+      res.writeHead(404)
+      res.end(JSON.stringify(this.createErrorResponse(null, -32000, 'Unknown MCP session')))
+      return
+    }
+    this.sessions.delete(sessionId)
+    session.stream?.end()
+    res.writeHead(204)
+    res.end()
+  }
+
   private async handleMCPRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     let body = ''
 
@@ -233,22 +294,58 @@ export class MCPServer {
     })
 
     req.on('end', async () => {
+      let message: unknown
       try {
-        const message: unknown = JSON.parse(body)
+        message = JSON.parse(body)
+        if (!isRecord(message) || typeof message.method !== 'string') {
+          throw new JsonRpcRequestError(-32600, 'Invalid Request')
+        }
+
         const era = this.detectProtocolEra(message, req.headers)
+        const sessionId = this.getHeader(req.headers, 'mcp-session-id')
+        const session = sessionId ? this.sessions.get(sessionId) : undefined
+        if (era === 'legacy' && message.method !== 'initialize' && !session) {
+          throw new JsonRpcRequestError(-32000, 'Session required: initialize must be completed before this request')
+        }
+        if (era === 'legacy' && session) {
+          session.lastActivity = new Date()
+          const requestedVersion = this.getHeader(req.headers, 'mcp-protocol-version')
+          if (requestedVersion && requestedVersion !== session.protocolVersion) {
+            throw new JsonRpcRequestError(-32020, 'HeaderMismatch: MCP-Protocol-Version must match the negotiated session version', {
+              header: requestedVersion,
+              session: session.protocolVersion,
+            })
+          }
+        }
         if (era === 'modern') {
           this.validateModernHttpRequest(message, req.headers)
         }
 
-        const response = await this.handleMessage(message, era)
+        const response = await this.handleMessage(message, era, session)
         if (!response) {
           res.writeHead(202)
           res.end()
           return
         }
+
+        if (era === 'legacy' && message.method === 'initialize' && !response.error) {
+          const protocolVersion = response.result && isRecord(response.result)
+            ? response.result.protocolVersion
+            : undefined
+          if (typeof protocolVersion === 'string' && this.isLegacyProtocolVersion(protocolVersion)) {
+            const newSession: MCPHttpSession = {
+              id: randomUUID(),
+              protocolVersion,
+              lastActivity: new Date(),
+            }
+            this.sessions.set(newSession.id, newSession)
+            res.setHeader('Mcp-Session-Id', newSession.id)
+          }
+        }
+
         const status = era === 'modern' && response.error
           ? this.getModernHttpErrorStatus(response.error.code)
-          : 200
+          : response.error && response.error.code === -32601 ? 404 : 200
         res.writeHead(status)
         res.end(JSON.stringify(response))
       }
@@ -257,13 +354,18 @@ export class MCPServer {
         const requestError = error instanceof JsonRpcRequestError
           ? error
           : new JsonRpcRequestError(-32700, `Parse error: ${getErrorMessage(error)}`)
-        res.writeHead(400)
+        const modern = message !== undefined && this.detectProtocolEra(message, req.headers) === 'modern'
+        res.writeHead(modern ? this.getModernHttpErrorStatus(requestError.code) : 400)
         res.end(JSON.stringify(this.createErrorResponse(null, requestError.code, requestError.message, requestError.data)))
       }
     })
   }
 
-  private async handleMessage(message: unknown, era: ProtocolEra = 'legacy'): Promise<JsonRpcResponse | null> {
+  private async handleMessage(
+    message: unknown,
+    era: ProtocolEra = 'legacy',
+    session?: MCPHttpSession,
+  ): Promise<JsonRpcResponse | null> {
     if (!isRecord(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
       return this.createErrorResponse(null, -32600, 'Invalid Request')
     }
@@ -329,6 +431,11 @@ export class MCPServer {
             serverInfo: SERVER_INFO,
           }
           break
+        case 'notifications/initialized':
+          if (era !== 'legacy' || !session) {
+            throw new JsonRpcRequestError(-32601, `Method not found: ${method}`)
+          }
+          return null
         default:
           throw new JsonRpcRequestError(-32601, `Method not found: ${method}`)
       }
@@ -388,22 +495,33 @@ export class MCPServer {
     return isRecord(params) && typeof params.protocolVersion === 'string'
   }
 
-  private negotiateLegacyProtocolVersion(clientVersion: string): string {
-    if (clientVersion !== LEGACY_PROTOCOL_VERSION) {
-      console.warn(`[MCPServer] Client requested protocol ${clientVersion}; using supported legacy version ${LEGACY_PROTOCOL_VERSION}`)
+  private negotiateLegacyProtocolVersion(clientVersion: string): LegacyProtocolVersion {
+    if (this.isLegacyProtocolVersion(clientVersion)) {
+      return clientVersion
     }
-    return LEGACY_PROTOCOL_VERSION
+    throw new JsonRpcRequestError(-32022, `Unsupported protocol version: ${clientVersion}`, {
+      supported: SUPPORTED_PROTOCOL_VERSIONS,
+      requested: clientVersion,
+    })
+  }
+
+  private isLegacyProtocolVersion(version: string): version is LegacyProtocolVersion {
+    return (LEGACY_PROTOCOL_VERSIONS as readonly string[]).includes(version)
   }
 
   private detectProtocolEra(message: unknown, headers: http.IncomingHttpHeaders): ProtocolEra {
-    if (typeof headers['mcp-protocol-version'] === 'string') {
-      return 'modern'
-    }
     if (isRecord(message) && isRecord(message.params) && isRecord(message.params._meta)
       && typeof message.params._meta['io.modelcontextprotocol/protocolVersion'] === 'string') {
       return 'modern'
     }
-    return 'legacy'
+    if (isRecord(message) && message.method === 'initialize') {
+      return 'legacy'
+    }
+    const sessionId = this.getHeader(headers, 'mcp-session-id')
+    if (sessionId && this.sessions.has(sessionId)) {
+      return 'legacy'
+    }
+    return this.getHeader(headers, 'mcp-protocol-version') ? 'modern' : 'legacy'
   }
 
   private validateModernHttpRequest(message: unknown, headers: http.IncomingHttpHeaders): void {
@@ -472,14 +590,18 @@ export class MCPServer {
       console.log('[MCPServer] HTTP server stopped')
     }
 
+    for (const session of this.sessions.values()) {
+      session.stream?.end()
+    }
     this.clients.clear()
+    this.sessions.clear()
   }
 
   public getStatus(): ServerStatus {
     return {
       running: !!this.httpServer,
       port: this.settings.port,
-      clients: 0, // HTTP is stateless, no persistent clients
+      clients: this.sessions.size,
     }
   }
 
