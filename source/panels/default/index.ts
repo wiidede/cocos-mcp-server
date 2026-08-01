@@ -1,8 +1,9 @@
 import type { App } from 'vue'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readFileSync } from 'fs-extra'
 import { computed, createApp, defineComponent, onMounted, ref, watch } from 'vue'
 
+const staticDir = join(__dirname, '../../static')
 const panelDataMap = new WeakMap<any, App>()
 
 // 定义工具配置接口
@@ -40,8 +41,8 @@ module.exports = Editor.Panel.define({
       console.log('[MCP Panel] Panel hidden')
     },
   },
-  template: readFileSync(join(__dirname, '../../../static/template/default/index.html'), 'utf-8'),
-  style: readFileSync(join(__dirname, '../../../static/style/default/index.css'), 'utf-8'),
+  template: readFileSync(join(staticDir, 'template/default/index.html'), 'utf-8'),
+  style: readFileSync(join(staticDir, 'style/default/index.css'), 'utf-8'),
   $: {
     app: '#app',
     panelTitle: '#panelTitle',
@@ -368,7 +369,7 @@ module.exports = Editor.Panel.define({
             getCategoryDisplayName,
           }
         },
-        template: readFileSync(join(__dirname, '../../../static/template/vue/mcp-server-app.html'), 'utf-8'),
+        template: readFileSync(join(staticDir, 'template/vue/mcp-server-app.html'), 'utf-8'),
       }))
 
       app.mount(this.$.app)

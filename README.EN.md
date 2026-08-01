@@ -23,14 +23,17 @@ This version is more than a simple client adaptation or a small collection of fi
 
 ## Install
 
-Place this repository in `extensions/cocos-mcp-server` inside a Cocos project, then run:
+Download the corresponding `cocos-mcp-server-v<version>.zip` from [GitHub Releases](https://github.com/wiidede/cocos-mcp-server/releases), then extract it into your Cocos project's `extensions/cocos-mcp-server/` directory. For example:
 
-```bash
-pnpm install
-pnpm build
+```text
+your-cocos-project/
+└── extensions/
+    └── cocos-mcp-server/
+        ├── package.json
+        └── ...
 ```
 
-Restart Cocos Creator or refresh extensions. Open `Extension > Cocos MCP Server`, then start the server. The default endpoint is `http://127.0.0.1:3000/mcp`.
+After importing or installing the extension, Open `Extension > Cocos MCP Server`, then start the server. The default endpoint is `http://127.0.0.1:3000/mcp`.
 
 ## Connect a Client
 
@@ -68,6 +71,8 @@ After connecting, the client discovers available tools and parameters through MC
 
 ## Development
 
+For development, run the following commands from the repository root:
+
 ```bash
 pnpm install
 pnpm typecheck
@@ -76,7 +81,15 @@ pnpm test
 pnpm build
 ```
 
-During development, use `pnpm watch` to rebuild continuously when source files change.
+After the build completes, use **Developer Import** in Cocos Creator and select the generated `cocos-mcp-server-pkg/` directory. During development, import this package directory instead of the repository root.
+
+To publish a new version, run:
+
+```bash
+pnpm release
+```
+
+This runs linting, type checking, and the build first, then `bumpp` updates the version, creates and pushes a `v*` tag. GitHub Actions detects the tag, generates `cocos-mcp-server-pkg/`, creates a versioned ZIP, and uploads it to the GitHub Release. The repository does not maintain a changelog file; release notes are generated on GitHub.
 
 The development test panel is available at `Extension > Cocos MCP Server > Dev Test Panel`. Tool implementations are in `source/tools/`; the public registry and schemas are in `source/tools/unified-tools.ts`.
 

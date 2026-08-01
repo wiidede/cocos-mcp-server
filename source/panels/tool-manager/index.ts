@@ -1,13 +1,15 @@
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readFileSync } from 'fs-extra'
+
+const staticDir = join(__dirname, '../../static')
 
 module.exports = Editor.Panel.define({
   listeners: {
     show() { console.log('Tool Manager panel shown') },
     hide() { console.log('Tool Manager panel hidden') },
   },
-  template: readFileSync(join(__dirname, '../../../static/template/default/tool-manager.html'), 'utf-8'),
-  style: readFileSync(join(__dirname, '../../../static/style/default/index.css'), 'utf-8'),
+  template: readFileSync(join(staticDir, 'template/default/tool-manager.html'), 'utf-8'),
+  style: readFileSync(join(staticDir, 'style/default/index.css'), 'utf-8'),
   $: {
     panelTitle: '#panelTitle',
     createConfigBtn: '#createConfigBtn',

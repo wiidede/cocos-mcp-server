@@ -23,14 +23,17 @@
 
 ## 安装
 
-将此仓库放入 Cocos 项目的 `extensions/cocos-mcp-server`，然后执行：
+从 [GitHub Releases](https://github.com/wiidede/cocos-mcp-server/releases) 下载对应版本的 `cocos-mcp-server-v<version>.zip`，解压到 Cocos 项目的 `extensions/cocos-mcp-server/` 目录。例如：
 
-```bash
-pnpm install
-pnpm build
+```text
+your-cocos-project/
+└── extensions/
+    └── cocos-mcp-server/
+        ├── package.json
+        └── ...
 ```
 
-重启 Cocos Creator 或刷新扩展，在 `扩展 > Cocos MCP Server` 打开面板并启动服务。默认地址为 `http://127.0.0.1:3000/mcp`。
+安装或导入后，在 `扩展 > Cocos MCP Server` 打开面板并启动服务。默认地址为 `http://127.0.0.1:3000/mcp`。
 
 ## 连接客户端
 
@@ -68,6 +71,8 @@ pnpm build
 
 ## 开发
 
+开发调试时，在仓库根目录执行：
+
 ```bash
 pnpm install
 pnpm typecheck
@@ -76,7 +81,15 @@ pnpm test
 pnpm build
 ```
 
-开发时可使用 `pnpm watch` 监听源文件并持续构建。
+构建完成后，在 Cocos Creator 中使用 **Developer Import**，直接选择生成的 `cocos-mcp-server-pkg/` 目录。开发时应导入这个发布包目录，而不是仓库根目录。
+
+发布新版本时运行：
+
+```bash
+pnpm release
+```
+
+该命令会依次执行 lint、类型检查、构建，然后由 `bumpp` 更新版本、创建 `v*` Tag 并推送到 GitHub。GitHub Actions 检测到 Tag 后会生成 `cocos-mcp-server-pkg/`，创建同版本 ZIP，并将其上传到 GitHub Release。项目不在仓库中维护 changelog 文件，变更记录由 GitHub Release 页面生成。
 
 开发测试面板位于 `扩展 > Cocos MCP Server > Dev Test Panel`。核心实现位于 `source/tools/`，工具注册和公开 schema 位于 `source/tools/unified-tools.ts`。
 

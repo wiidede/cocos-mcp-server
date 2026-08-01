@@ -14,5 +14,8 @@ export default defineConfig({
   target: 'node18',
   dts: false,
   sourcemap: false,
-  external: ['cc'],
+  deps: {
+    alwaysBundle: ['vue'],
+    neverBundle: ['cc'],
+  },
 })

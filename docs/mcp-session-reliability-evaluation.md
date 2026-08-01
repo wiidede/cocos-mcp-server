@@ -24,20 +24,20 @@
 
 每次评估先记录以下信息：
 
-| 字段 | 内容 |
-| --- | --- |
-| 评估编号 | 例如 `mcp-eval-2026-08-01-01` |
-| 日期和时间 | 包含时区 |
-| Git commit | `git rev-parse HEAD`；有未提交修改时另记 `git diff --stat` |
-| 扩展版本 | `server_control.health` 返回的 `version` |
-| Cocos Creator 版本 | 例如 `3.8.7` |
-| MCP 客户端及版本 | Claude CLI、Pi、IDE 插件等 |
-| MCP 协议 | legacy `2024-11-05` 或 modern `2026-07-28` |
-| 模型 | 完整模型标识 |
-| 会话文件 | JSONL 绝对路径 |
-| 项目初始状态 | 当前 scene、关键资产和是否有未保存修改 |
-| 任务说明 | 原始提示词或其脱敏版本 |
-| `tools/list` 新鲜度 | 是否在扩展重载后开启了全新会话 |
+| 字段                | 内容                                                       |
+| ------------------- | ---------------------------------------------------------- |
+| 评估编号            | 例如 `mcp-eval-2026-08-01-01`                              |
+| 日期和时间          | 包含时区                                                   |
+| Git commit          | `git rev-parse HEAD`；有未提交修改时另记 `git diff --stat` |
+| 扩展版本            | `server_control.health` 返回的 `version`                   |
+| Cocos Creator 版本  | 例如 `3.8.7`                                               |
+| MCP 客户端及版本    | Claude CLI、Pi、IDE 插件等                                 |
+| MCP 协议            | legacy `2024-11-05` 或 modern `2026-07-28`                 |
+| 模型                | 完整模型标识                                               |
+| 会话文件            | JSONL 绝对路径                                             |
+| 项目初始状态        | 当前 scene、关键资产和是否有未保存修改                     |
+| 任务说明            | 原始提示词或其脱敏版本                                     |
+| `tools/list` 新鲜度 | 是否在扩展重载后开启了全新会话                             |
 
 协议版本应根据实际请求判断，而不是根据服务端支持版本判断：
 
@@ -125,17 +125,17 @@ registry 采用率 = 契约错误后调用 tool_registry 的次数 / 契约错�
 
 每个失败只能有一个主要类别，可以额外记录次要原因。
 
-| 类别 | 判断标准 | 典型例子 |
-| --- | --- | --- |
-| `model_contract` | schema 正确，模型没有按契约调用 | 缺少 action、猜错字段 |
-| `client_schema` | 客户端丢失、简化或错误解释 schema | 未向模型呈现 `oneOf` 或 required |
-| `server_contract` | tools/list、registry、validator 和 executor 不一致 | schema 要求 `urlOrUUID`，执行器要求 `assetPath` |
-| `server_implementation` | 合法调用进入实现后发生代码或 IPC 缺陷 | 使用不存在的 Editor message |
-| `target_state` | 节点、组件、场景或资产目标不存在/状态不满足 | 组件没有挂载到目标节点 |
-| `asset_readiness` | 资产尚未导入、刷新、编译或注册 | 脚本刚创建但 asset-db 尚不可查 |
-| `runtime` | Cocos 编辑器或预览运行时真实错误 | 场景脚本运行异常 |
-| `protocol` | MCP transport 或 JSON-RPC 契约错误 | modern header/body 不一致 |
-| `unknown` | 证据不足 | 无法关联调用或结果被截断 |
+| 类别                    | 判断标准                                           | 典型例子                                        |
+| ----------------------- | -------------------------------------------------- | ----------------------------------------------- |
+| `model_contract`        | schema 正确，模型没有按契约调用                    | 缺少 action、猜错字段                           |
+| `client_schema`         | 客户端丢失、简化或错误解释 schema                  | 未向模型呈现 `oneOf` 或 required                |
+| `server_contract`       | tools/list、registry、validator 和 executor 不一致 | schema 要求 `urlOrUUID`，执行器要求 `assetPath` |
+| `server_implementation` | 合法调用进入实现后发生代码或 IPC 缺陷              | 使用不存在的 Editor message                     |
+| `target_state`          | 节点、组件、场景或资产目标不存在/状态不满足        | 组件没有挂载到目标节点                          |
+| `asset_readiness`       | 资产尚未导入、刷新、编译或注册                     | 脚本刚创建但 asset-db 尚不可查                  |
+| `runtime`               | Cocos 编辑器或预览运行时真实错误                   | 场景脚本运行异常                                |
+| `protocol`              | MCP transport 或 JSON-RPC 契约错误                 | modern header/body 不一致                       |
+| `unknown`               | 证据不足                                           | 无法关联调用或结果被截断                        |
 
 归因顺序：
 
@@ -214,6 +214,7 @@ docs/session-evaluation-2026-08-01.md
 # Cocos MCP 会话评估（日期）
 
 ## 环境
+
 - commit：
 - 扩展版本：
 - Cocos Creator：
@@ -224,26 +225,31 @@ docs/session-evaluation-2026-08-01.md
 - 任务：
 
 ## 摘要
-| 指标 | 本轮 | 基线 | 变化 |
-| --- | ---: | ---: | ---: |
-| Cocos MCP 调用数 | | | |
-| 失败数 | | 104 | |
-| 失败率 | | | |
-| TOOL_CONTRACT_ERROR | | | |
-| 相同失败重复数 | | | |
-| 一次恢复率 | | | |
-| 平均恢复调用数 | | | |
+
+| 指标                | 本轮 | 基线 | 变化 |
+| ------------------- | ---: | ---: | ---: |
+| Cocos MCP 调用数    |      |      |      |
+| 失败数              |      |  104 |      |
+| 失败率              |      |      |      |
+| TOOL_CONTRACT_ERROR |      |      |      |
+| 相同失败重复数      |      |      |      |
+| 一次恢复率          |      |      |      |
+| 平均恢复调用数      |      |      |      |
 
 ## 错误分类
+
 | 类别 | 数量 | 占比 | 判断 |
-| --- | ---: | ---: | --- |
+| ---- | ---: | ---: | ---- |
 
 ## 按工具统计
+
 | tool | action | 调用数 | 失败数 | 重复失败 | 一次恢复 | 主要原因 |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
+| ---- | ------ | -----: | -----: | -------: | -------: | -------- |
 
 ## 高频错误链路
+
 ### 1. 标题
+
 - 首次调用：
 - 返回：
 - 后续调用：

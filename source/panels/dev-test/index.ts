@@ -1,7 +1,9 @@
 import type { TestResult } from './test-infra'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readFileSync } from 'fs-extra'
 import { testRunner } from './test-infra'
+
+const staticDir = join(__dirname, '../../static')
 
 interface TestMeta {
   name: string
@@ -14,8 +16,8 @@ module.exports = Editor.Panel.define({
     show() { console.log('[Dev Test] Panel shown') },
     hide() { console.log('[Dev Test] Panel hidden') },
   },
-  template: readFileSync(join(__dirname, '../../../static/template/default/dev-test.html'), 'utf-8'),
-  style: readFileSync(join(__dirname, '../../../static/style/default/index.css'), 'utf-8'),
+  template: readFileSync(join(staticDir, 'template/default/dev-test.html'), 'utf-8'),
+  style: readFileSync(join(staticDir, 'style/default/index.css'), 'utf-8'),
   $: {
     runAllBtn: '#runAllBtn',
     runCoreBtn: '#runCoreBtn',

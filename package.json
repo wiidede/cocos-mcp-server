@@ -3,44 +3,45 @@
   "package_version": 2,
   "name": "cocos-mcp-server",
   "version": "2.0.0",
+  "packageManager": "pnpm@10.12.4",
   "description": "i18n:cocos-mcp-server.description",
   "author": "LiDaxian & wiidede",
   "editor": ">=3.8.6",
   "main": "./dist/main.cjs",
   "files": [
+    "README.EN.md",
+    "README.md",
     "dist/",
     "i18n/",
-    "package.json",
-    "static/"
+    "package.json"
   ],
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && node scripts/create-release.mjs",
+    "release": "pnpm lint && pnpm typecheck && pnpm build && bumpp",
     "watch": "tsdown -w",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "fs-extra": "^11.3.6",
-    "vue": "^3.5.39"
-  },
   "devDependencies": {
     "@antfu/eslint-config": "^9.1.0",
     "@cocos/creator-types": "^3.8.7",
-    "@types/fs-extra": "^11.0.4",
     "@types/node": "^26.0.1",
+    "bumpp": "^12.1.1",
+    "changelogithub": "^15.0.4",
     "eslint": "^10.6.0",
     "eslint-plugin-format": "^2.0.1",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "vue": "^3.5.39"
   },
   "panels": {
     "default": {
       "title": "i18n:cocos-mcp-server.panel_title",
       "type": "dockable",
       "main": "dist/panels/default/index.cjs",
-      "icon": "./static/icon.png",
+      "icon": "./dist/static/icon.png",
       "size": {
         "min-width": 400,
         "min-height": 300,
@@ -52,7 +53,7 @@
       "title": "Dev Test",
       "type": "dockable",
       "main": "dist/panels/dev-test/index.cjs",
-      "icon": "./static/icon.png",
+      "icon": "./dist/static/icon.png",
       "size": {
         "min-width": 600,
         "min-height": 400,

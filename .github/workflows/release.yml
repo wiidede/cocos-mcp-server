@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set node
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build release package
+        run: pnpm build
+
+      - name: Create release archive
+        shell: bash
+        run: |
+          archive="cocos-mcp-server-${GITHUB_REF_NAME}.zip"
+          (
+            cd cocos-mcp-server-pkg
+            zip -qr "../${archive}" .
+          )
+          echo "Created ${archive}"
+
+      - name: Generate GitHub release notes
+        run: pnpm exec changelogithub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release archive
+        run: gh release upload "${GITHUB_REF_NAME}" "cocos-mcp-server-${GITHUB_REF_NAME}.zip" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
