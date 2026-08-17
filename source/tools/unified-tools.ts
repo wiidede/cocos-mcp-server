@@ -127,7 +127,15 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   folder: PROP.string('Folder path or URL'),
   url: PROP.string('Asset URL'),
   urlOrUUID: PROP.string('Asset URL or UUID'),
-  content: { description: 'Text or serialized content' },
+  content: {
+    oneOf: [
+      { type: 'string' },
+      { type: 'object' },
+      { type: 'array' },
+      { type: 'null' },
+    ],
+    description: 'Text or JSON-serializable content; objects and arrays are serialized before writing',
+  },
   source: PROP.string('Source URL'),
   target: PROP.string('Target URL or UUID'),
   sourcePath: PROP.string('Source file path'),
@@ -154,9 +162,9 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   debug: PROP.boolean('Debug mode', { default: true }),
   timeout: PROP.number('Timeout in milliseconds', { default: 5000 }),
   limit: PROP.number('Result limit', { default: 100 }),
-  lines: PROP.number('Number of lines', { default: 100 }),
+  lines: PROP.number('Number of lines', { default: 100, minimum: 1, maximum: 10000 }),
   filterKeyword: PROP.string('Filter keyword'),
-  logLevel: PROP.string('Log level', { default: 'ALL' }),
+  logLevel: PROP.string('Log level', { enum: ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'ALL'], default: 'ALL' }),
   script: PROP.string('JavaScript snippet'),
   platform: PROP.string('Platform'),
   type: PROP.string('Type filter'),
@@ -166,10 +174,13 @@ const SHARED_PROPERTIES: Record<string, JsonSchema> = {
   overwrite: PROP.boolean('Overwrite existing files', { default: false }),
   format: PROP.string('Format'),
   quality: PROP.number('Quality'),
-  maxResults: PROP.number('Maximum results', { default: 20 }),
-  contextLines: PROP.number('Context lines', { default: 2 }),
+  maxResults: PROP.number('Maximum results', { default: 20, minimum: 1, maximum: 100 }),
+  contextLines: PROP.number('Context lines', { default: 1, minimum: 0, maximum: 10 }),
+  maxChars: PROP.number('Maximum result characters', { default: 12000, minimum: 4000, maximum: 64000 }),
+  startLine: PROP.number('First log line to scan (1-based)', { default: 1, minimum: 1 }),
   rootUuid: PROP.string('Root node UUID'),
-  maxDepth: PROP.number('Maximum tree depth', { default: 10 }),
+  maxDepth: PROP.number('Maximum tree depth', { default: 3, minimum: 0, maximum: 20 }),
+  maxNodes: PROP.number('Maximum nodes to return', { default: 200, minimum: 1, maximum: 5000 }),
   port: PROP.number('Port'),
   visible: PROP.boolean('Visibility flag'),
   includeMetadata: PROP.boolean('Include metadata', { default: true }),
@@ -302,13 +313,13 @@ export class UnifiedTools {
         'scene_hierarchy',
         'Read the editor scene hierarchy or a bounded subtree. Use this before node writes because node names are not unique. Actions: get_tree.',
         ['get_tree'],
-        ['includeComponents', 'rootUuid', 'maxDepth'],
+        ['includeComponents', 'rootUuid', 'maxDepth', 'maxNodes'],
         args => this.routeLegacyAction('scene_hierarchy', {
           get_tree: 'scene_get_scene_hierarchy',
         }, args),
         {},
         [
-          { name: 'get_tree', description: 'Read the scene hierarchy or a subtree with optional component details and depth limit.', properties: ['includeComponents', 'rootUuid', 'maxDepth'], example: { action: 'get_tree', includeComponents: true, maxDepth: 3 } },
+          { name: 'get_tree', description: 'Read the scene hierarchy or a subtree with optional component details and depth/node limits.', properties: ['includeComponents', 'rootUuid', 'maxDepth', 'maxNodes'], example: { action: 'get_tree', includeComponents: true, maxDepth: 3, maxNodes: 200 } },
         ],
       ),
       this.createTool(
@@ -716,7 +727,7 @@ export class UnifiedTools {
         {},
         [
           { name: 'import', description: 'Import a filesystem asset into a project folder. Existing target files are replaced by default; set overwrite=false to reject collisions.', properties: ['sourcePath', 'targetFolder', 'overwrite'], required: ['sourcePath', 'targetFolder'], example: { action: 'import', sourcePath: '/absolute/path/to/Player.png', targetFolder: 'db://assets/textures', overwrite: true } },
-          { name: 'create', description: 'Create an asset at an asset URL.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
+          { name: 'create', description: 'Create an asset at an asset URL. JSON objects and arrays are serialized automatically.', properties: ['url', 'content', 'overwrite'], required: ['url'] },
           { name: 'copy', description: 'Copy an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
           { name: 'move', description: 'Move an asset URL.', properties: ['source', 'target', 'overwrite'], required: ['source', 'target'] },
           { name: 'delete', description: 'Delete an asset by URL.', properties: ['url'], required: ['url'] },
@@ -861,7 +872,7 @@ export class UnifiedTools {
         'debug_logs',
         'Read and search Cocos project/editor log files. Use targeted search patterns to reduce returned log volume. Actions: get, get_file_info, search.',
         ['get', 'get_file_info', 'search'],
-        ['lines', 'filterKeyword', 'logLevel', 'pattern', 'maxResults', 'contextLines'],
+        ['lines', 'filterKeyword', 'logLevel', 'pattern', 'maxResults', 'contextLines', 'maxChars', 'startLine'],
         args => this.routeLegacyAction('debug_logs', {
           get: 'debug_get_project_logs',
           get_file_info: 'debug_get_log_file_info',
@@ -869,9 +880,9 @@ export class UnifiedTools {
         }, args),
         {},
         [
-          { name: 'get', description: 'Read recent project log lines.', properties: ['lines', 'filterKeyword', 'logLevel'] },
+          { name: 'get', description: 'Read recent project log lines within a character budget. The original logFilePath is returned for complete filtering.', properties: ['lines', 'filterKeyword', 'logLevel', 'maxChars'] },
           { name: 'get_file_info', description: 'Get project log-file information.' },
-          { name: 'search', description: 'Search project logs by pattern.', properties: ['pattern', 'maxResults', 'contextLines'], required: ['pattern'] },
+          { name: 'search', description: 'Search project logs by pattern with bounded, deduplicated context and pagination.', properties: ['pattern', 'maxResults', 'contextLines', 'maxChars', 'startLine'], required: ['pattern'] },
         ],
       ),
       this.createTool(
@@ -1260,7 +1271,7 @@ export class UnifiedTools {
       return { category: 'target', retryable: true, nextTool: 'node_query', nextAction: 'get_info', retryWith: { uuid: args.nodeUuid ?? args.uuid }, attempted }
     }
     if (toolName.startsWith('asset') || toolName.startsWith('project_asset') || toolName.startsWith('project_query') || lowerError.includes('asset')) {
-      return { category: 'asset', retryable: true, nextTool: 'asset_query', nextAction: 'details', retryWith: { urlOrUUID: args.urlOrUUID ?? args.url ?? args.assetPath ?? args.uuid }, attempted }
+      return { category: 'asset', retryable: true, nextTool: 'asset_query', nextAction: 'get_details', retryWith: { urlOrUUID: args.urlOrUUID ?? args.url ?? args.assetPath ?? args.uuid }, attempted }
     }
     if (lowerError.includes('editor.message') || lowerError.includes('ipc') || lowerError.includes('message')) {
       return { category: 'ipc', retryable: true, nextTool: 'debug_logs', nextAction: 'search', attempted }

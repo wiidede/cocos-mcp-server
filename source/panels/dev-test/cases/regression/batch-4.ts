@@ -22,6 +22,7 @@ export const batch4Tests: TestCase[] = [
         action: 'get_tree',
         includeComponents: true,
         maxDepth: 1,
+        maxNodes: 200,
       })
       ctx.step('bounded scene tree succeeds', response?.success === true, response?.error?.slice(0, 200))
       ctx.assert(response?.success === true, `get_tree failed: ${response?.error ?? JSON.stringify(response)?.slice(0, 200)}`)
@@ -30,6 +31,7 @@ export const batch4Tests: TestCase[] = [
       ctx.step('scene root returned', tree?.uuid != null, tree?.name)
       ctx.assert(tree?.uuid != null, 'get_tree did not return the scene root')
       ctx.assert(typeof tree?.childCount === 'number', 'get_tree did not return childCount')
+      ctx.assert(typeof tree?.returnedNodes === 'number' && tree.returnedNodes <= 200, 'get_tree exceeded maxNodes')
     },
   },
   {

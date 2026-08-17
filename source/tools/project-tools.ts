@@ -23,6 +23,28 @@ function isToolArguments(value: unknown): value is ToolArguments {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isAssetContent(value: unknown): value is string | Record<string, unknown> | unknown[] | null {
+  return value === null || typeof value === 'string' || (typeof value === 'object' && value !== null)
+}
+
+function summarizeAssetContent(value: unknown): Record<string, unknown> {
+  if (value === null)
+    return { type: 'null' }
+  if (typeof value === 'string')
+    return { type: 'string', chars: value.length }
+  if (Array.isArray(value))
+    return { type: 'array', items: value.length }
+  if (typeof value === 'object' && value !== null)
+    return { type: 'object', keys: Object.keys(value).length }
+  return { type: typeof value }
+}
+
+function serializeAssetContent(value: string | Record<string, unknown> | unknown[] | null | undefined): string | null {
+  if (value === undefined || value === null)
+    return null
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
 export class ProjectTools implements ToolExecutor {
   getTools(): ToolDefinition[] {
     return [
@@ -211,9 +233,13 @@ export class ProjectTools implements ToolExecutor {
               description: 'Asset URL (e.g., db://assets/newfile.json)',
             },
             content: {
-              type: 'string',
-              description: 'File content (null for folder)',
-              default: null,
+              oneOf: [
+                { type: 'string' },
+                { type: 'object' },
+                { type: 'array' },
+                { type: 'null' },
+              ],
+              description: 'File content. JSON objects and arrays are serialized automatically; omit for a folder.',
             },
             overwrite: {
               type: 'boolean',
@@ -478,11 +504,27 @@ export class ProjectTools implements ToolExecutor {
           : toolFailure('start_preview_server port must be a number when provided')
       case 'stop_preview_server':
         return this.stopPreviewServer()
-      case 'create_asset':
-        return typeof args.url === 'string' && (args.content === undefined || typeof args.content === 'string' || args.content === null)
-          && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
-          ? this.createAsset(args.url, args.content, args.overwrite)
-          : toolFailure('create_asset requires url and optional string content/overwrite boolean')
+      case 'create_asset': {
+        if (typeof args.url !== 'string' || (args.content !== undefined && !isAssetContent(args.content))) {
+          return toolFailure('create_asset requires a url string and string, object, array, or null content', {
+            errorCode: 'TOOL_CONTRACT_ERROR',
+            instruction: 'Pass JSON content as an object or array; it will be serialized before the asset is created.',
+            metadata: {
+              category: 'contract',
+              retryable: true,
+              attempted: { url: args.url, overwrite: args.overwrite, content: summarizeAssetContent(args.content) },
+              allowed: ['url', 'content', 'overwrite'],
+            },
+          })
+        }
+        if (args.overwrite !== undefined && typeof args.overwrite !== 'boolean') {
+          return toolFailure('create_asset overwrite must be a boolean when provided', {
+            errorCode: 'TOOL_CONTRACT_ERROR',
+            metadata: { category: 'contract', retryable: true, attempted: { url: args.url, overwrite: args.overwrite }, allowed: ['url', 'content', 'overwrite'] },
+          })
+        }
+        return this.createAsset(args.url, serializeAssetContent(args.content), args.overwrite)
+      }
       case 'copy_asset':
         return typeof args.source === 'string' && typeof args.target === 'string' && (args.overwrite === undefined || typeof args.overwrite === 'boolean')
           ? this.copyAsset(args.source, args.target, args.overwrite)
@@ -494,9 +536,13 @@ export class ProjectTools implements ToolExecutor {
       case 'delete_asset':
         return typeof args.url === 'string' ? this.deleteAsset(args.url) : toolFailure('delete_asset requires url')
       case 'save_asset':
-        return typeof args.url === 'string' && typeof args.content === 'string'
-          ? this.saveAsset(args.url, args.content)
-          : toolFailure('save_asset requires url and content strings')
+        if (typeof args.url !== 'string' || args.content === undefined || args.content === null || !isAssetContent(args.content)) {
+          return toolFailure('save_asset requires a url string and non-null string, object, or array content', {
+            errorCode: 'TOOL_CONTRACT_ERROR',
+            metadata: { category: 'contract', retryable: true, attempted: { url: args.url, content: summarizeAssetContent(args.content) }, allowed: ['url', 'content'] },
+          })
+        }
+        return this.saveAsset(args.url, serializeAssetContent(args.content)!)
       case 'reimport_asset':
         return typeof args.url === 'string' ? this.reimportAsset(args.url) : toolFailure('reimport_asset requires url')
       case 'resolve_asset_identity':

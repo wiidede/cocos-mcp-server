@@ -1,7 +1,9 @@
 import type { MCPClient, MCPServerSettings, ServerStatus, ToolConfig, ToolDefinition, ToolResponse } from './types'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
+import * as fs from 'node:fs'
 import * as http from 'node:http'
+import * as path from 'node:path'
 import packageMetadata from '../package.json'
 import { UnifiedTools } from './tools/unified-tools'
 
@@ -29,6 +31,8 @@ const LEGACY_PROTOCOL_VERSIONS = ['2025-03-26', '2025-06-18', '2025-11-25'] as c
 const MODERN_PROTOCOL_VERSION = '2026-07-28'
 const SUPPORTED_PROTOCOL_VERSIONS = [...LEGACY_PROTOCOL_VERSIONS, MODERN_PROTOCOL_VERSION]
 const SERVER_INFO = { name: packageMetadata.name, version: packageMetadata.version } as const
+const MAX_TOOL_RESULT_CHARS = 64_000
+const TOOL_RESULT_EXPORT_DIRECTORY = 'temp/cocos-mcp-server/exports'
 
 type LegacyProtocolVersion = typeof LEGACY_PROTOCOL_VERSIONS[number]
 type ProtocolEra = 'legacy' | 'modern'
@@ -164,6 +168,78 @@ export class MCPServer {
 
   public async executeDevTestToolCall(toolName: string, args: unknown): Promise<ToolResponse> {
     return this.unifiedTools.execute(toolName, args)
+  }
+
+  private prepareToolResult(toolName: string, toolResult: ToolResponse): { result: ToolResponse, text: string } {
+    let text: string
+    try {
+      text = JSON.stringify(toolResult)
+    }
+    catch (error: unknown) {
+      const result: ToolResponse = {
+        success: false,
+        errorCode: 'TOOL_EXECUTION_ERROR',
+        error: `Tool result could not be serialized: ${getErrorMessage(error)}`,
+        instruction: 'Retry with a smaller query or omit large object content from the request.',
+      }
+      return { result, text: JSON.stringify(result) }
+    }
+
+    if (text.length <= MAX_TOOL_RESULT_CHARS) {
+      return { result: toolResult, text }
+    }
+
+    try {
+      const projectPath = Editor.Project.path
+      if (!projectPath) {
+        throw new Error('Editor.Project.path is unavailable')
+      }
+
+      const exportDirectory = path.join(projectPath, TOOL_RESULT_EXPORT_DIRECTORY)
+      const safeToolName = toolName.replace(/[^\w-]/g, '-')
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const fileName = `${timestamp}-${safeToolName}-${randomUUID().slice(0, 8)}.json`
+      const exportPath = path.join(exportDirectory, fileName)
+
+      fs.mkdirSync(exportDirectory, { recursive: true })
+      fs.writeFileSync(exportPath, JSON.stringify(toolResult, null, 2), 'utf8')
+
+      const result: ToolResponse = {
+        success: toolResult.success,
+        ...(toolResult.success
+          ? {}
+          : {
+              errorCode: toolResult.errorCode,
+              error: toolResult.error ?? 'Tool execution failed; the full response was exported.',
+            }),
+        message: `Tool result exceeded the ${MAX_TOOL_RESULT_CHARS}-character inline limit and was exported to a file.`,
+        warning: 'The complete tool result is not included inline. Read or filter the exported JSON file instead.',
+        data: {
+          exported: true,
+          toolName,
+          format: 'json',
+          resultChars: text.length,
+          inlineLimitChars: MAX_TOOL_RESULT_CHARS,
+          path: exportPath,
+          relativePath: path.relative(projectPath, exportPath),
+        },
+      }
+      return { result, text: JSON.stringify(result) }
+    }
+    catch (error: unknown) {
+      const result: ToolResponse = {
+        success: false,
+        errorCode: 'TOOL_EXECUTION_ERROR',
+        error: `Tool result exceeded the inline limit, but export failed: ${getErrorMessage(error)}`,
+        instruction: 'Retry with a narrower query or verify that the project temp directory is writable.',
+        data: {
+          toolName,
+          resultChars: text.length,
+          inlineLimitChars: MAX_TOOL_RESULT_CHARS,
+        },
+      }
+      return { result, text: JSON.stringify(result) }
+    }
   }
 
   public getClients(): MCPClient[] {
@@ -410,9 +486,11 @@ export class MCPServer {
           if (!this.toolsList.some(tool => tool.name === name)) {
             throw new JsonRpcRequestError(-32602, `Unknown or disabled tool: ${name}`)
           }
-          const toolResult = await this.executeToolCall(name, args)
+          const rawToolResult = await this.executeToolCall(name, args)
+          const preparedToolResult = this.prepareToolResult(name, rawToolResult)
+          const toolResult = preparedToolResult.result
           result = {
-            content: [{ type: 'text', text: JSON.stringify(toolResult) }],
+            content: [{ type: 'text', text: preparedToolResult.text }],
             ...(era === 'modern' ? { structuredContent: toolResult } : {}),
             isError: !toolResult.success,
           }
@@ -640,7 +718,8 @@ export class MCPServer {
         }
 
         // Execute tool
-        const result = await this.executeToolCall(fullToolName, params)
+        const rawResult = await this.executeToolCall(fullToolName, params)
+        const result = this.prepareToolResult(fullToolName, rawResult).result
 
         res.writeHead(200)
         res.end(JSON.stringify({

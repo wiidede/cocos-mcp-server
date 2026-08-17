@@ -1,5 +1,9 @@
 import type { ToolResponse } from './types'
-import { describe, expect, it, vi } from 'vitest'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import packageMetadata from '../package.json'
 import { MCPServer } from './mcp-server'
 
 const settings = {
@@ -24,6 +28,15 @@ const modernMeta = {
   'io.modelcontextprotocol/protocolVersion': '2026-07-28',
   'io.modelcontextprotocol/clientCapabilities': {},
 }
+
+const temporaryProjectPaths: string[] = []
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  for (const projectPath of temporaryProjectPaths.splice(0)) {
+    fs.rmSync(projectPath, { recursive: true, force: true })
+  }
+})
 
 describe('mcp protocol handler', () => {
   it.each(['2025-03-26', '2025-06-18', '2025-11-25'] as const)('negotiates supported legacy protocol %s', async (protocolVersion) => {
@@ -95,7 +108,7 @@ describe('mcp protocol handler', () => {
         _meta: {
           'io.modelcontextprotocol/serverInfo': {
             name: 'cocos-mcp-server',
-            version: '2.0.0',
+            version: packageMetadata.version,
           },
         },
       },
@@ -180,6 +193,92 @@ describe('mcp protocol handler', () => {
     })
   })
 
+  it('exports oversized successful tool results without marking the call as failed', async () => {
+    const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'cocos-mcp-server-test-'))
+    temporaryProjectPaths.push(projectPath)
+    vi.stubGlobal('Editor', { Project: { path: projectPath } })
+
+    const completeResult: ToolResponse = {
+      success: true,
+      data: { items: Array.from({ length: 100 }, () => 'x'.repeat(1000)) },
+    }
+    const server = new MCPServer(settings)
+    const internal = server as unknown as {
+      setupTools: () => void
+      executeToolCall: (name: string, args: unknown) => Promise<ToolResponse>
+      handleMessage: (request: unknown, era?: 'legacy' | 'modern') => Promise<unknown>
+    }
+    internal.setupTools()
+    internal.executeToolCall = vi.fn(async () => completeResult)
+
+    const response = await internal.handleMessage({
+      jsonrpc: '2.0',
+      id: 'large-result-1',
+      method: 'tools/call',
+      params: {
+        _meta: modernMeta,
+        name: 'scene_lifecycle',
+        arguments: { action: 'get_current' },
+      },
+    }, 'modern') as { result: Record<string, any> }
+
+    expect(response.result.isError).toBe(false)
+    expect(response.result.structuredContent).toMatchObject({
+      success: true,
+      data: {
+        exported: true,
+        toolName: 'scene_lifecycle',
+        format: 'json',
+        resultChars: expect.any(Number),
+        inlineLimitChars: 64000,
+        path: expect.any(String),
+        relativePath: expect.stringMatching(/^temp\/cocos-mcp-server\/exports\//),
+      },
+    })
+    expect((response.result.content[0].text as string).length).toBeLessThan(2000)
+
+    const exportPath = response.result.structuredContent.data.path as string
+    expect(exportPath.startsWith(projectPath)).toBe(true)
+    expect(JSON.parse(fs.readFileSync(exportPath, 'utf8'))).toEqual(completeResult)
+  })
+
+  it('reports a real execution error when an oversized result cannot be exported', async () => {
+    const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'cocos-mcp-server-test-'))
+    temporaryProjectPaths.push(projectPath)
+    fs.writeFileSync(path.join(projectPath, 'temp'), 'not a directory')
+    vi.stubGlobal('Editor', { Project: { path: projectPath } })
+
+    const server = new MCPServer(settings)
+    const internal = server as unknown as {
+      setupTools: () => void
+      executeToolCall: (name: string, args: unknown) => Promise<ToolResponse>
+      handleMessage: (request: unknown, era?: 'legacy' | 'modern') => Promise<unknown>
+    }
+    internal.setupTools()
+    internal.executeToolCall = vi.fn(async () => ({
+      success: true,
+      data: { items: Array.from({ length: 100 }, () => 'x'.repeat(1000)) },
+    }))
+
+    const response = await internal.handleMessage({
+      jsonrpc: '2.0',
+      id: 'large-result-export-failure',
+      method: 'tools/call',
+      params: {
+        _meta: modernMeta,
+        name: 'scene_lifecycle',
+        arguments: { action: 'get_current' },
+      },
+    }, 'modern') as { result: Record<string, any> }
+
+    expect(response.result.isError).toBe(true)
+    expect(response.result.structuredContent).toMatchObject({
+      success: false,
+      errorCode: 'TOOL_EXECUTION_ERROR',
+      error: expect.stringContaining('export failed'),
+      data: { resultChars: expect.any(Number), inlineLimitChars: 64000 },
+    })
+  })
   it('does not add cache hints to modern tool call results', async () => {
     const response = await handle({
       jsonrpc: '2.0',

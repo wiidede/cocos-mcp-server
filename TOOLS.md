@@ -22,7 +22,7 @@ MCP 客户端应以 `tools/list` 返回的名称、描述和 input schema 为准
 
 ## 调用原则
 
-- 先查询再修改：场景用 `scene_hierarchy`，节点用 `node_query`，组件用 `component_query`，资源优先用 `asset_query`；项目信息和设置使用 `project_query`。`scene_hierarchy.get_tree` 可用 `rootUuid`、`maxDepth` 和 `includeComponents` 限定返回范围。
+- 先查询再修改：场景用 `scene_hierarchy`，节点用 `node_query`，组件用 `component_query`，资源优先用 `asset_query`；项目信息和设置使用 `project_query`。`scene_hierarchy.get_tree` 默认限制深度和节点数，可用 `rootUuid`、`maxDepth`、`maxNodes` 和 `includeComponents` 限定返回范围。`debug_logs.get` 和 `debug_logs.search` 默认限制返回字符数；`get` 截断时可直接过滤返回的 `logFilePath`，`search` 超出时可使用 `nextStartLine` 继续查询。其他成功工具结果超过 64000 个字符时会自动导出到项目 `temp/cocos-mcp-server/exports/`，返回摘要中的 `data.path` 指向完整 JSON。
 - 写操作使用 UUID、`nodeUuid`、`assetUuid` 和 `prefabPath`；名称仅适合搜索，且不保证唯一。
 - 不要猜 Cocos Editor message 名称；只调用 `tools/list` 暴露的工具和 action。
 - `scene_execution.execute_scene_script` 只能调用扩展已注册 scene script 的导出方法，不能执行临时 JavaScript；任意 JavaScript 执行工具不会暴露在 `tools/list` 中，资源查询、日志读取和场景修改应使用对应的专用工具。

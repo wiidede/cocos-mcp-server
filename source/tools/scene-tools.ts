@@ -1,7 +1,7 @@
 import type { SceneNodeDump } from '../editor-message'
 import type { SceneInfo, ToolDefinition, ToolExecutor, ToolResponse } from '../types'
 import { requestAssetDb, requestEditor, requestScene } from '../editor-message'
-import { buildSceneHierarchy } from './scene-hierarchy'
+import { buildSceneHierarchyResult } from './scene-hierarchy'
 import { toolFailure } from './tool-response'
 
 type ToolArguments = Record<string, unknown>
@@ -116,7 +116,15 @@ export class SceneTools implements ToolExecutor {
             },
             maxDepth: {
               type: 'number',
-              description: 'Optional maximum depth relative to the selected root',
+              description: 'Maximum depth relative to the selected root',
+              default: 3,
+              minimum: 0,
+            },
+            maxNodes: {
+              type: 'number',
+              description: 'Maximum number of nodes to return',
+              default: 200,
+              minimum: 1,
             },
           },
         },
@@ -156,9 +164,10 @@ export class SceneTools implements ToolExecutor {
       case 'get_scene_hierarchy':
         return (args.includeComponents === undefined || typeof args.includeComponents === 'boolean')
           && (args.rootUuid === undefined || typeof args.rootUuid === 'string')
-          && (args.maxDepth === undefined || typeof args.maxDepth === 'number')
-          ? this.getSceneHierarchy(args.includeComponents, args.rootUuid, args.maxDepth)
-          : toolFailure('get_scene_hierarchy accepts optional includeComponents boolean, rootUuid string, and maxDepth number')
+          && (args.maxDepth === undefined || (typeof args.maxDepth === 'number' && Number.isInteger(args.maxDepth) && args.maxDepth >= 0))
+          && (args.maxNodes === undefined || (typeof args.maxNodes === 'number' && Number.isInteger(args.maxNodes) && args.maxNodes >= 1))
+          ? this.getSceneHierarchy(args.includeComponents, args.rootUuid, args.maxDepth, args.maxNodes)
+          : toolFailure('get_scene_hierarchy accepts optional includeComponents, rootUuid, non-negative integer maxDepth, and positive integer maxNodes')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -536,7 +545,7 @@ export class SceneTools implements ToolExecutor {
     }
   }
 
-  private async getSceneHierarchy(includeComponents: boolean = false, rootUuid?: string, maxDepth?: number): Promise<ToolResponse> {
+  private async getSceneHierarchy(includeComponents: boolean = false, rootUuid?: string, maxDepth: number = 3, maxNodes: number = 200): Promise<ToolResponse> {
     try {
       const tree = await requestScene('query-node-tree')
       if (!tree) {
@@ -548,9 +557,16 @@ export class SceneTools implements ToolExecutor {
         return { success: false, error: `Node with UUID ${rootUuid} not found` }
       }
 
+      const result = buildSceneHierarchyResult(root, includeComponents, maxDepth, maxNodes)
       return {
         success: true,
-        data: buildSceneHierarchy(root, includeComponents, maxDepth),
+        data: {
+          ...result.tree,
+          returnedNodes: result.returnedNodes,
+          maxDepth,
+          maxNodes,
+          truncated: result.truncated,
+        },
       }
     }
     catch (err: unknown) {

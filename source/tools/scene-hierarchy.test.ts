@@ -20,4 +20,21 @@ describe('scene hierarchy builder', () => {
       children: [{ uuid: 'child', childCount: 1, truncated: true, children: [] }],
     })
   })
+
+  it('limits the returned node count and marks omitted descendants', () => {
+    const tree = {
+      uuid: 'root',
+      children: [
+        { uuid: 'child-a', children: [{ uuid: 'grandchild-a' }] },
+        { uuid: 'child-b' },
+      ],
+    }
+
+    expect(buildSceneHierarchy(tree, false, undefined, 2)).toMatchObject({
+      uuid: 'root',
+      childCount: 2,
+      children: [{ uuid: 'child-a', childCount: 1, children: [] }],
+      truncated: true,
+    })
+  })
 })

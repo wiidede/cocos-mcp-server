@@ -25,6 +25,197 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+interface LogContextLine {
+  lineNumber: number
+  content: string
+  isMatch: boolean
+}
+
+export interface LogContextBlock {
+  startLine: number
+  endLine: number
+  lines: LogContextLine[]
+}
+
+export interface LogSearchOptions {
+  maxResults: number
+  contextLines: number
+  maxChars: number
+  startLine: number
+}
+
+export interface LogSearchData {
+  returned: number
+  matchedTotal: number
+  truncated: boolean
+  scanComplete: boolean
+  nextStartLine?: number
+  chars: number
+  matches: Array<{ lineNumber: number, matchedLine: string }>
+  contextBlocks: LogContextBlock[]
+}
+
+export interface BoundedLogLines {
+  logs: string[]
+  chars: number
+  returnedLines: number
+  omittedLines: number
+  truncated: boolean
+  lineTruncated: boolean
+}
+
+const PROJECT_LOG_LEVELS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'ALL'] as const
+
+function clipLogLine(line: string, maxChars: number): string {
+  const marker = '... [truncated]'
+  let low = 0
+  let high = line.length
+
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    const candidate = `${line.slice(0, middle)}${marker}`
+    if (JSON.stringify([candidate]).length <= maxChars)
+      low = middle
+    else
+      high = middle - 1
+  }
+
+  return `${line.slice(0, low)}${marker}`
+}
+
+export function boundRecentLogLines(logLines: string[], maxChars: number): BoundedLogLines {
+  const logs: string[] = []
+  let chars = JSON.stringify(logs).length
+  let lineTruncated = false
+
+  for (let index = logLines.length - 1; index >= 0; index--) {
+    const lineChars = JSON.stringify(logLines[index]).length
+    const candidateChars = chars + lineChars + (logs.length > 0 ? 1 : 0)
+    if (candidateChars <= maxChars) {
+      logs.unshift(logLines[index])
+      chars = candidateChars
+      continue
+    }
+
+    if (logs.length === 0) {
+      const clippedLine = clipLogLine(logLines[index], maxChars)
+      logs.push(clippedLine)
+      chars = JSON.stringify(logs).length
+      lineTruncated = true
+    }
+    break
+  }
+
+  const omittedLines = logLines.length - logs.length
+  return {
+    logs,
+    chars,
+    returnedLines: logs.length,
+    omittedLines,
+    truncated: omittedLines > 0 || lineTruncated,
+    lineTruncated,
+  }
+}
+
+function createLogContextBlocks(logLines: string[], matchIndexes: number[], contextLines: number): LogContextBlock[] {
+  const ranges: Array<{ start: number, end: number, matches: Set<number> }> = []
+  for (const index of matchIndexes) {
+    const start = Math.max(0, index - contextLines)
+    const end = Math.min(logLines.length - 1, index + contextLines)
+    const previous = ranges[ranges.length - 1]
+    if (previous && start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, end)
+      previous.matches.add(index)
+    }
+    else {
+      ranges.push({ start, end, matches: new Set([index]) })
+    }
+  }
+
+  return ranges.map(range => ({
+    startLine: range.start + 1,
+    endLine: range.end + 1,
+    lines: Array.from({ length: range.end - range.start + 1 }, (_, offset) => {
+      const index = range.start + offset
+      return {
+        lineNumber: index + 1,
+        content: logLines[index],
+        isMatch: range.matches.has(index),
+      }
+    }),
+  }))
+}
+
+export function searchLogLines(logLines: string[], regex: RegExp, options: LogSearchOptions): LogSearchData {
+  const startIndex = options.startLine - 1
+  const matchingIndexes: number[] = []
+  for (let index = startIndex; index < logLines.length; index++) {
+    regex.lastIndex = 0
+    if (regex.test(logLines[index])) {
+      matchingIndexes.push(index)
+    }
+  }
+
+  const selectedIndexes: number[] = []
+  const selectedLineOverrides = new Map<number, string>()
+  let selectedBlocks: LogContextBlock[] = []
+  for (const index of matchingIndexes.slice(0, options.maxResults)) {
+    const candidateIndexes = [...selectedIndexes, index]
+    const candidateBlocks = createLogContextBlocks(logLines, candidateIndexes, options.contextLines)
+    const candidateMatches = candidateIndexes.map(matchIndex => ({
+      lineNumber: matchIndex + 1,
+      matchedLine: logLines[matchIndex],
+    }))
+    const candidateChars = JSON.stringify({ matches: candidateMatches, contextBlocks: candidateBlocks }).length
+
+    if (selectedIndexes.length > 0 && candidateChars > options.maxChars) {
+      break
+    }
+
+    if (selectedIndexes.length === 0 && candidateChars > options.maxChars) {
+      const bareBlocks = createLogContextBlocks(logLines, [index], 0)
+      const bareMatches = [{ lineNumber: index + 1, matchedLine: logLines[index] }]
+      const bareChars = JSON.stringify({ matches: bareMatches, contextBlocks: bareBlocks }).length
+      if (bareChars <= options.maxChars) {
+        selectedIndexes.push(index)
+        selectedBlocks = bareBlocks
+        continue
+      }
+
+      const clippedLength = Math.max(64, Math.floor(options.maxChars / 3))
+      const clippedLine = logLines[index].slice(0, clippedLength)
+      selectedIndexes.push(index)
+      selectedBlocks = [{
+        startLine: index + 1,
+        endLine: index + 1,
+        lines: [{ lineNumber: index + 1, content: clippedLine, isMatch: true }],
+      }]
+      selectedLineOverrides.set(index, clippedLine)
+      continue
+    }
+
+    selectedIndexes.push(index)
+    selectedBlocks = candidateBlocks
+  }
+
+  const matches = selectedIndexes.map(index => ({
+    lineNumber: index + 1,
+    matchedLine: selectedLineOverrides.get(index) ?? logLines[index],
+  }))
+  const chars = JSON.stringify({ matches, contextBlocks: selectedBlocks }).length
+  const truncated = selectedIndexes.length < matchingIndexes.length
+  return {
+    returned: selectedIndexes.length,
+    matchedTotal: matchingIndexes.length,
+    truncated,
+    scanComplete: true,
+    nextStartLine: truncated && selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] + 2 : undefined,
+    chars,
+    matches,
+    contextBlocks: selectedBlocks,
+  }
+}
+
 export class DebugTools implements ToolExecutor {
   private consoleMessages: ConsoleMessage[] = []
   private readonly maxMessages = 1000
@@ -167,6 +358,13 @@ export class DebugTools implements ToolExecutor {
               enum: ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'ALL'],
               default: 'ALL',
             },
+            maxChars: {
+              type: 'number',
+              description: 'Maximum characters in the returned logs array',
+              default: 12000,
+              minimum: 4000,
+              maximum: 64000,
+            },
           },
         },
       },
@@ -197,10 +395,23 @@ export class DebugTools implements ToolExecutor {
             },
             contextLines: {
               type: 'number',
-              description: 'Number of context lines to show around each match',
-              default: 2,
+              description: 'Number of context lines around each match',
+              default: 1,
               minimum: 0,
               maximum: 10,
+            },
+            maxChars: {
+              type: 'number',
+              description: 'Maximum characters in returned matches and context',
+              default: 12000,
+              minimum: 4000,
+              maximum: 64000,
+            },
+            startLine: {
+              type: 'number',
+              description: 'First 1-based log line to scan for pagination',
+              default: 1,
+              minimum: 1,
             },
           },
           required: ['pattern'],
@@ -237,19 +448,28 @@ export class DebugTools implements ToolExecutor {
       case 'get_editor_info':
         return this.getEditorInfo()
       case 'get_project_logs':
-        return (args.lines === undefined || typeof args.lines === 'number')
+        return (args.lines === undefined || (typeof args.lines === 'number' && Number.isInteger(args.lines) && args.lines >= 1 && args.lines <= 10000))
           && (args.filterKeyword === undefined || typeof args.filterKeyword === 'string')
-          && (args.logLevel === undefined || typeof args.logLevel === 'string')
-          ? this.getProjectLogs(args.lines, args.filterKeyword, args.logLevel)
-          : toolFailure('get_project_logs accepts optional lines, filterKeyword, and logLevel')
+          && (args.logLevel === undefined || (typeof args.logLevel === 'string' && PROJECT_LOG_LEVELS.includes(args.logLevel as typeof PROJECT_LOG_LEVELS[number])))
+          && (args.maxChars === undefined || (typeof args.maxChars === 'number' && Number.isInteger(args.maxChars) && args.maxChars >= 4000 && args.maxChars <= 64000))
+          ? this.getProjectLogs(args.lines, args.filterKeyword, args.logLevel, args.maxChars)
+          : toolFailure('get_project_logs accepts lines (1-10000), filterKeyword, a supported logLevel, and maxChars (4000-64000)', {
+              metadata: {
+                category: 'contract',
+                retryable: true,
+                allowed: ['lines', 'filterKeyword', 'logLevel', 'maxChars'],
+              },
+            })
       case 'get_log_file_info':
         return this.getLogFileInfo()
       case 'search_project_logs':
         return typeof args.pattern === 'string'
-          && (args.maxResults === undefined || typeof args.maxResults === 'number')
-          && (args.contextLines === undefined || typeof args.contextLines === 'number')
-          ? this.searchProjectLogs(args.pattern, args.maxResults, args.contextLines)
-          : toolFailure('search_project_logs requires pattern and optional numeric limits')
+          && (args.maxResults === undefined || (typeof args.maxResults === 'number' && Number.isInteger(args.maxResults) && args.maxResults >= 1 && args.maxResults <= 100))
+          && (args.contextLines === undefined || (typeof args.contextLines === 'number' && Number.isInteger(args.contextLines) && args.contextLines >= 0 && args.contextLines <= 10))
+          && (args.maxChars === undefined || (typeof args.maxChars === 'number' && Number.isInteger(args.maxChars) && args.maxChars >= 4000 && args.maxChars <= 64000))
+          && (args.startLine === undefined || (typeof args.startLine === 'number' && Number.isInteger(args.startLine) && args.startLine >= 1))
+          ? this.searchProjectLogs(args.pattern, args.maxResults, args.contextLines, args.maxChars, args.startLine)
+          : toolFailure('search_project_logs requires pattern and optional bounded integer limits')
       default:
         throw new Error(`Unknown tool: ${toolName}`)
     }
@@ -438,7 +658,12 @@ export class DebugTools implements ToolExecutor {
     return { success: true, data: info }
   }
 
-  private async getProjectLogs(lines: number = 100, filterKeyword?: string, logLevel: string = 'ALL'): Promise<ToolResponse> {
+  private async getProjectLogs(
+    lines: number = 100,
+    filterKeyword?: string,
+    logLevel: string = 'ALL',
+    maxChars: number = 12000,
+  ): Promise<ToolResponse> {
     try {
       // Try multiple possible project paths
       let logFilePath = ''
@@ -486,15 +711,25 @@ export class DebugTools implements ToolExecutor {
         )
       }
 
+      const bounded = boundRecentLogLines(filteredLines, maxChars)
       return {
         success: true,
+        instruction: bounded.truncated
+          ? 'Use debug_logs.search or filter logFilePath directly when older or complete logs are required.'
+          : undefined,
         data: {
           totalLines: logLines.length,
           requestedLines: lines,
           filteredLines: filteredLines.length,
+          returnedLines: bounded.returnedLines,
+          omittedLines: bounded.omittedLines,
+          truncated: bounded.truncated,
+          lineTruncated: bounded.lineTruncated,
+          chars: bounded.chars,
+          maxChars,
           logLevel,
           filterKeyword: filterKeyword || null,
-          logs: filteredLines,
+          logs: bounded.logs,
           logFilePath,
         },
       }
@@ -556,7 +791,13 @@ export class DebugTools implements ToolExecutor {
     }
   }
 
-  private async searchProjectLogs(pattern: string, maxResults: number = 20, contextLines: number = 2): Promise<ToolResponse> {
+  private async searchProjectLogs(
+    pattern: string,
+    maxResults: number = 20,
+    contextLines: number = 1,
+    maxChars: number = 12000,
+    startLine: number = 1,
+  ): Promise<ToolResponse> {
     try {
       // Try multiple possible project paths
       let logFilePath = ''
@@ -580,60 +821,26 @@ export class DebugTools implements ToolExecutor {
         }
       }
 
-      const logContent = fs.readFileSync(logFilePath, 'utf8')
-      const logLines = logContent.split('\n')
-
-      // Create regex pattern (support both string and regex patterns)
+      const logLines = fs.readFileSync(logFilePath, 'utf8').split('\n')
       let regex: RegExp
       try {
         regex = new RegExp(pattern, 'gi')
       }
       catch {
-        // If pattern is not valid regex, treat as literal string
         regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
       }
 
-      const matches: Record<string, unknown>[] = []
-      let resultCount = 0
-
-      for (let i = 0; i < logLines.length && resultCount < maxResults; i++) {
-        const line = logLines[i]
-        if (regex.test(line)) {
-          // Get context lines
-          const contextStart = Math.max(0, i - contextLines)
-          const contextEnd = Math.min(logLines.length - 1, i + contextLines)
-
-          const contextLinesArray = []
-          for (let j = contextStart; j <= contextEnd; j++) {
-            contextLinesArray.push({
-              lineNumber: j + 1,
-              content: logLines[j],
-              isMatch: j === i,
-            })
-          }
-
-          matches.push({
-            lineNumber: i + 1,
-            matchedLine: line,
-            context: contextLinesArray,
-          })
-
-          resultCount++
-
-          // Reset regex lastIndex for global search
-          regex.lastIndex = 0
-        }
-      }
-
+      const search = searchLogLines(logLines, regex, { maxResults, contextLines, maxChars, startLine })
       return {
         success: true,
         data: {
           pattern,
-          totalMatches: matches.length,
+          startLine,
           maxResults,
           contextLines,
+          maxChars,
           logFilePath,
-          matches,
+          ...search,
         },
       }
     }
